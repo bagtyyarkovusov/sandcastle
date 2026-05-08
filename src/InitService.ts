@@ -190,6 +190,37 @@ WORKDIR /home/agent
 ENTRYPOINT ["sleep", "infinity"]
 `;
 
+const KIMI_CODE_DOCKERFILE = `FROM node:22-bookworm
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \\
+  git \\
+  curl \\
+  jq \\
+  && rm -rf /var/lib/apt/lists/*
+
+{{BACKLOG_MANAGER_TOOLS}}
+
+# Build-args for UID/GID alignment
+ARG AGENT_UID=1000
+ARG AGENT_GID=1000
+
+RUN groupmod -g $AGENT_GID node && usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
+
+# Install Kimi Code CLI (run as root before USER agent)
+RUN export PATH="/home/agent/.local/bin:$PATH" && curl -LsSf https://code.kimi.com/install.sh | bash
+
+# Minimal Kimi config — API key injected at runtime via KIMI_API_KEY env var
+RUN mkdir -p /home/agent/.kimi && \\
+    printf 'default_model = "kimi-k2.6"\\n\\n[providers.kimi]\\ntype = "kimi"\\nbase_url = "https://api.kimi.com/coding/v1"\\napi_key = ""\\n\\n[models."kimi-k2.6"]\\nprovider = "kimi"\\nmodel = "kimi-k2.6"\\nmax_context_size = 262144\\n' > /home/agent/.kimi/config.toml
+
+USER \${AGENT_UID}:\${AGENT_GID}
+
+WORKDIR /home/agent
+
+ENTRYPOINT ["sleep", "infinity"]
+`;
+
 const AGENT_REGISTRY: AgentEntry[] = [
   {
     name: "claude-code",
@@ -227,6 +258,15 @@ OPENAI_KEY=`,
     dockerfileTemplate: OPENCODE_DOCKERFILE,
     envExample: `# OpenCode API key
 OPENCODE_API_KEY=`,
+  },
+  {
+    name: "kimi-code",
+    label: "Kimi Code",
+    defaultModel: "kimi-k2.6",
+    factoryImport: "kimiCode",
+    dockerfileTemplate: KIMI_CODE_DOCKERFILE,
+    envExample: `# Kimi / Moonshot AI API key
+KIMI_API_KEY=`,
   },
 ];
 

@@ -21,7 +21,11 @@ const TOOL_ARG_FIELDS: Record<string, string> = {
 const extractErrorMessage = (obj: any): string | undefined => {
   const err = obj.error;
   if (typeof err === "string") return err;
-  if (typeof err === "object" && err !== null && typeof err.message === "string") {
+  if (
+    typeof err === "object" &&
+    err !== null &&
+    typeof err.message === "string"
+  ) {
     return err.message;
   }
   if (typeof obj.message === "string") return obj.message;
@@ -420,5 +424,106 @@ export const claudeCode = (
       }
     }
     return undefined;
+  },
+});
+
+// ---------------------------------------------------------------------------
+// Kimi Code agent provider
+// ---------------------------------------------------------------------------
+
+/** Kimi tool name → display argument field. */
+const KIMI_TOOL_ARGS: Record<string, string> = {
+  Shell: "command",
+  FetchURL: "url",
+  SearchWeb: "query",
+  ReadFile: "path",
+};
+
+const parseKimiStreamLine = (line: string): ParsedStreamEvent[] => {
+  if (!line.startsWith("{")) {
+    // Session resume hint: "To resume this session: kimi -r <id>"
+    const m = line.match(/^To resume this session: kimi -r (\S+)/);
+    if (m) return [{ type: "session_id", sessionId: m[1]! }];
+    return [];
+  }
+
+  let obj: any;
+  try {
+    obj = JSON.parse(line);
+  } catch {
+    return [];
+  }
+
+  // Assistant message — text content and/or tool calls
+  if (obj.role === "assistant") {
+    const events: ParsedStreamEvent[] = [];
+
+    // Text content — can be a string or an empty array (when tool calls present)
+    if (typeof obj.content === "string" && obj.content.length > 0) {
+      events.push({ type: "text", text: obj.content });
+    }
+
+    // Tool calls — arguments are a JSON-encoded string
+    if (Array.isArray(obj.tool_calls)) {
+      for (const tc of obj.tool_calls) {
+        if (
+          tc.type === "function" &&
+          typeof tc.function?.name === "string" &&
+          tc.function?.arguments !== undefined
+        ) {
+          const name: string = tc.function.name;
+          const argField = KIMI_TOOL_ARGS[name];
+          if (!argField) continue;
+
+          let parsed: any;
+          try {
+            parsed = JSON.parse(tc.function.arguments);
+          } catch {
+            continue;
+          }
+          const args = parsed[argField];
+          if (typeof args !== "string") continue;
+
+          events.push({ type: "tool_call", name, args });
+        }
+      }
+    }
+
+    return events;
+  }
+
+  // role === "tool" — skip tool result messages
+  return [];
+};
+
+/** Options for the kimi agent provider. */
+export interface KimiCodeOptions {
+  /** Environment variables injected by this agent provider. */
+  readonly env?: Record<string, string>;
+}
+
+export const kimiCode = (
+  model: string,
+  options?: KimiCodeOptions,
+): AgentProvider => ({
+  name: "kimi-code",
+  env: options?.env ?? {},
+  captureSessions: false,
+
+  buildPrintCommand({ prompt }: AgentCommandOptions): PrintCommand {
+    return {
+      command: `kimi --print --output-format stream-json --model ${shellEscape(model)}`,
+      stdin: prompt,
+    };
+  },
+
+  buildInteractiveArgs({ prompt }: AgentCommandOptions): string[] {
+    const args = ["kimi", "--model", model];
+    if (prompt) args.push(prompt);
+    return args;
+  },
+
+  parseStreamLine(line: string): ParsedStreamEvent[] {
+    return parseKimiStreamLine(line);
   },
 });

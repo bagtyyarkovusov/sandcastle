@@ -475,13 +475,14 @@ const parseKimiStreamLine = (line: string): ParsedStreamEvent[] => {
           const argField = KIMI_TOOL_ARGS[name];
           if (!argField) continue;
 
-          let parsed: any;
+          let parsed: unknown;
           try {
             parsed = JSON.parse(tc.function.arguments);
           } catch {
             continue;
           }
-          const args = parsed[argField];
+          if (typeof parsed !== "object" || parsed === null) continue;
+          const args = (parsed as Record<string, unknown>)[argField];
           if (typeof args !== "string") continue;
 
           events.push({ type: "tool_call", name, args });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { claudeCode, codex, opencode, pi } from "./AgentProvider.js";
+import { claudeCode, codex, kimiCode, opencode, pi } from "./AgentProvider.js";
 import type { AgentCommandOptions } from "./AgentProvider.js";
 
 /** Shorthand: build options with dangerouslySkipPermissions: true (mirrors existing sandbox callers). */
@@ -759,7 +759,9 @@ describe("opencode factory", () => {
   });
 
   it("buildPrintCommand shell-escapes the variant value", () => {
-    const provider = opencode("opencode/big-pickle", { variant: "it's tricky" });
+    const provider = opencode("opencode/big-pickle", {
+      variant: "it's tricky",
+    });
     const { command } = provider.buildPrintCommand(opts("test"));
     expect(command).toContain("--variant 'it'\\''s tricky'");
   });
@@ -810,6 +812,305 @@ describe("opencode factory", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// kimiCode factory
+// ---------------------------------------------------------------------------
+
+describe("kimiCode factory", () => {
+  it("returns a provider with name 'kimi-code'", () => {
+    const provider = kimiCode("kimi-k2.6");
+    expect(provider.name).toBe("kimi-code");
+  });
+
+  it("does not expose envManifest or dockerfileTemplate", () => {
+    const provider = kimiCode("kimi-k2.6");
+    expect(provider).not.toHaveProperty("envManifest");
+    expect(provider).not.toHaveProperty("dockerfileTemplate");
+  });
+
+  it("buildPrintCommand includes the model and --output-format stream-json", () => {
+    const provider = kimiCode("kimi-k2.6");
+    const { command } = provider.buildPrintCommand(opts("do something"));
+    expect(command).toContain("kimi-k2.6");
+    expect(command).toContain("--output-format stream-json");
+    expect(command).toContain("--print");
+  });
+
+  it("buildPrintCommand delivers prompt via stdin, not argv", () => {
+    const provider = kimiCode("kimi-k2.6");
+    const { command, stdin } = provider.buildPrintCommand(opts("it's a test"));
+    expect(command).not.toContain("it's a test");
+    expect(stdin).toBe("it's a test");
+  });
+
+  it("buildPrintCommand does NOT use -p flag for stdin (Kimi reads stdin directly)", () => {
+    const provider = kimiCode("kimi-k2.6");
+    const { command } = provider.buildPrintCommand(opts("do something"));
+    expect(command).not.toContain("-p -");
+  });
+
+  it("buildPrintCommand shell-escapes the model", () => {
+    const provider = kimiCode("kimi-k2.6");
+    const { command } = provider.buildPrintCommand(opts("do something"));
+    expect(command).toContain("--model 'kimi-k2.6'");
+  });
+
+  it("bakes model into each provider instance independently", () => {
+    const provider1 = kimiCode("model-a");
+    const provider2 = kimiCode("model-b");
+    expect(provider1.buildPrintCommand(opts("test")).command).toContain(
+      "model-a",
+    );
+    expect(provider2.buildPrintCommand(opts("test")).command).toContain(
+      "model-b",
+    );
+    expect(provider1.buildPrintCommand(opts("test")).command).not.toContain(
+      "model-b",
+    );
+  });
+
+  // --- parseStreamLine: text content ---
+
+  it("parseStreamLine extracts text from assistant message", () => {
+    const provider = kimiCode("kimi-k2.6");
+    const line = JSON.stringify({ role: "assistant", content: "Hello world" });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "text", text: "Hello world" },
+    ]);
+  });
+
+  it("parseStreamLine skips empty assistant content string", () => {
+    const provider = kimiCode("kimi-k2.6");
+    const line = JSON.stringify({ role: "assistant", content: "" });
+    expect(provider.parseStreamLine(line)).toEqual([]);
+  });
+
+  // --- parseStreamLine: tool calls ---
+
+  it("parseStreamLine extracts Shell tool call with command arg", () => {
+    const provider = kimiCode("kimi-k2.6");
+    const line = JSON.stringify({
+      role: "assistant",
+      content: [],
+      tool_calls: [
+        {
+          type: "function",
+          id: "tc_1",
+          function: {
+            name: "Shell",
+            arguments: JSON.stringify({ command: "npm test" }),
+          },
+        },
+      ],
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "tool_call", name: "Shell", args: "npm test" },
+    ]);
+  });
+
+  it("parseStreamLine extracts FetchURL tool call with url arg", () => {
+    const provider = kimiCode("kimi-k2.6");
+    const line = JSON.stringify({
+      role: "assistant",
+      content: [],
+      tool_calls: [
+        {
+          type: "function",
+          id: "tc_2",
+          function: {
+            name: "FetchURL",
+            arguments: JSON.stringify({ url: "https://example.com" }),
+          },
+        },
+      ],
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "tool_call", name: "FetchURL", args: "https://example.com" },
+    ]);
+  });
+
+  it("parseStreamLine extracts SearchWeb tool call with query arg", () => {
+    const provider = kimiCode("kimi-k2.6");
+    const line = JSON.stringify({
+      role: "assistant",
+      content: [],
+      tool_calls: [
+        {
+          type: "function",
+          id: "tc_3",
+          function: {
+            name: "SearchWeb",
+            arguments: JSON.stringify({ query: "latest docs" }),
+          },
+        },
+      ],
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "tool_call", name: "SearchWeb", args: "latest docs" },
+    ]);
+  });
+
+  it("parseStreamLine extracts ReadFile tool call with path arg", () => {
+    const provider = kimiCode("kimi-k2.6");
+    const line = JSON.stringify({
+      role: "assistant",
+      content: [],
+      tool_calls: [
+        {
+          type: "function",
+          id: "tc_4",
+          function: {
+            name: "ReadFile",
+            arguments: JSON.stringify({ path: "/tmp/test.txt" }),
+          },
+        },
+      ],
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "tool_call", name: "ReadFile", args: "/tmp/test.txt" },
+    ]);
+  });
+
+  it("parseStreamLine emits text AND tool calls when both present", () => {
+    const provider = kimiCode("kimi-k2.6");
+    const line = JSON.stringify({
+      role: "assistant",
+      content: "Let me check...",
+      tool_calls: [
+        {
+          type: "function",
+          id: "tc_5",
+          function: {
+            name: "Shell",
+            arguments: JSON.stringify({ command: "ls" }),
+          },
+        },
+      ],
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "text", text: "Let me check..." },
+      { type: "tool_call", name: "Shell", args: "ls" },
+    ]);
+  });
+
+  it("parseStreamLine skips non-allowlisted Kimi tools", () => {
+    const provider = kimiCode("kimi-k2.6");
+    const line = JSON.stringify({
+      role: "assistant",
+      content: [],
+      tool_calls: [
+        {
+          type: "function",
+          id: "tc_6",
+          function: {
+            name: "UnknownTool",
+            arguments: JSON.stringify({ foo: "bar" }),
+          },
+        },
+      ],
+    });
+    expect(provider.parseStreamLine(line)).toEqual([]);
+  });
+
+  // --- parseStreamLine: session ID ---
+
+  it("parseStreamLine extracts session_id from resume hint line", () => {
+    const provider = kimiCode("kimi-k2.6");
+    const line = "To resume this session: kimi -r sess_abc123";
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "session_id", sessionId: "sess_abc123" },
+    ]);
+  });
+
+  it("parseStreamLine ignores other non-JSON lines", () => {
+    const provider = kimiCode("kimi-k2.6");
+    expect(provider.parseStreamLine("Some random output")).toEqual([]);
+  });
+
+  // --- parseStreamLine: edge cases ---
+
+  it("parseStreamLine skips role=tool messages (tool results)", () => {
+    const provider = kimiCode("kimi-k2.6");
+    const line = JSON.stringify({
+      role: "tool",
+      content: "file contents here",
+      tool_call_id: "tc_1",
+    });
+    expect(provider.parseStreamLine(line)).toEqual([]);
+  });
+
+  it("parseStreamLine returns empty array for non-JSON lines", () => {
+    const provider = kimiCode("kimi-k2.6");
+    expect(provider.parseStreamLine("not json")).toEqual([]);
+    expect(provider.parseStreamLine("")).toEqual([]);
+  });
+
+  it("parseStreamLine returns empty array for malformed JSON", () => {
+    const provider = kimiCode("kimi-k2.6");
+    expect(provider.parseStreamLine("{bad json")).toEqual([]);
+  });
+
+  it("parseStreamLine handles tool_calls with missing function name", () => {
+    const provider = kimiCode("kimi-k2.6");
+    const line = JSON.stringify({
+      role: "assistant",
+      content: [],
+      tool_calls: [
+        {
+          type: "function",
+          id: "tc_1",
+          function: { arguments: JSON.stringify({ command: "ls" }) },
+        },
+      ],
+    });
+    expect(provider.parseStreamLine(line)).toEqual([]);
+  });
+
+  it("parseStreamLine handles tool_calls with invalid JSON arguments", () => {
+    const provider = kimiCode("kimi-k2.6");
+    const line = JSON.stringify({
+      role: "assistant",
+      content: [],
+      tool_calls: [
+        {
+          type: "function",
+          id: "tc_1",
+          function: { name: "Shell", arguments: "{bad json" },
+        },
+      ],
+    });
+    expect(provider.parseStreamLine(line)).toEqual([]);
+  });
+
+  it("parseStreamLine handles null arguments", () => {
+    const provider = kimiCode("kimi-k2.6");
+    const line = JSON.stringify({
+      role: "assistant",
+      content: [],
+      tool_calls: [
+        {
+          type: "function",
+          id: "tc_1",
+          function: { name: "Shell", arguments: null },
+        },
+      ],
+    });
+    expect(provider.parseStreamLine(line)).toEqual([]);
+  });
+
+  it("accepts an env option and exposes it on the provider", () => {
+    const provider = kimiCode("kimi-k2.6", {
+      env: { KIMI_API_KEY: "sk-test" },
+    });
+    expect(provider.env).toEqual({ KIMI_API_KEY: "sk-test" });
+  });
+
+  it("defaults env to empty object when not provided", () => {
+    const provider = kimiCode("kimi-k2.6");
+    expect(provider.env).toEqual({});
+  });
+});
+
 describe("resumeSession on non-Claude providers", () => {
   it("pi ignores resumeSession in buildPrintCommand", () => {
     const provider = pi("claude-sonnet-4-6");
@@ -835,6 +1136,17 @@ describe("resumeSession on non-Claude providers", () => {
 
   it("opencode ignores resumeSession in buildPrintCommand", () => {
     const provider = opencode("opencode/big-pickle");
+    const { command } = provider.buildPrintCommand({
+      prompt: "test",
+      dangerouslySkipPermissions: true,
+      resumeSession: "abc-123",
+    });
+    expect(command).not.toContain("--resume");
+    expect(command).not.toContain("abc-123");
+  });
+
+  it("kimiCode ignores resumeSession in buildPrintCommand", () => {
+    const provider = kimiCode("kimi-k2.6");
     const { command } = provider.buildPrintCommand({
       prompt: "test",
       dangerouslySkipPermissions: true,
@@ -948,6 +1260,10 @@ describe("parseSessionUsage (Claude Code)", () => {
   it("is not defined on opencode provider", () => {
     expect(opencode("model").parseSessionUsage).toBeUndefined();
   });
+
+  it("is not defined on kimiCode provider", () => {
+    expect(kimiCode("model").parseSessionUsage).toBeUndefined();
+  });
 });
 
 describe("captureSessions flag", () => {
@@ -971,5 +1287,9 @@ describe("captureSessions flag", () => {
 
   it("opencode has captureSessions false", () => {
     expect(opencode("opencode-model").captureSessions).toBe(false);
+  });
+
+  it("kimiCode has captureSessions false", () => {
+    expect(kimiCode("kimi-model").captureSessions).toBe(false);
   });
 });

@@ -207,14 +207,14 @@ ARG AGENT_GID=1000
 
 RUN groupmod -g $AGENT_GID node && usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
 
-# Install Kimi Code CLI (run as root before USER agent)
+USER \${AGENT_UID}:\${AGENT_GID}
+
+# Install Kimi Code CLI
 RUN export PATH="/home/agent/.local/bin:$PATH" && curl -LsSf https://code.kimi.com/install.sh | bash
 
 # Minimal Kimi config — API key injected at runtime via KIMI_API_KEY env var
 RUN mkdir -p /home/agent/.kimi && \\
     printf 'default_model = "kimi-k2.6"\\n\\n[providers.kimi]\\ntype = "kimi"\\nbase_url = "https://api.kimi.com/coding/v1"\\napi_key = ""\\n\\n[models."kimi-k2.6"]\\nprovider = "kimi"\\nmodel = "kimi-k2.6"\\nmax_context_size = 262144\\n' > /home/agent/.kimi/config.toml
-
-USER \${AGENT_UID}:\${AGENT_GID}
 
 WORKDIR /home/agent
 

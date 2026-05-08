@@ -25,6 +25,7 @@ const claudeCodeAgent = getAgent("claude-code")!;
 const piAgent = getAgent("pi")!;
 const codexAgent = getAgent("codex")!;
 const opencodeAgent = getAgent("opencode")!;
+const kimiCodeAgent = getAgent("kimi-code")!;
 
 const defaultOptions: ScaffoldOptions = {
   agent: claudeCodeAgent,
@@ -106,6 +107,22 @@ describe("Agent registry", () => {
     expect(agent!.factoryImport).toBe("opencode");
     expect(agent!.dockerfileTemplate).toContain("FROM");
     expect(agent!.dockerfileTemplate).toContain("opencode-ai");
+  });
+
+  it("listAgents includes kimi-code", () => {
+    const agents = listAgents();
+    expect(agents.some((a) => a.name === "kimi-code")).toBe(true);
+  });
+
+  it("getAgent returns kimi-code entry with expected fields", () => {
+    const agent = getAgent("kimi-code");
+    expect(agent).toBeDefined();
+    expect(agent!.name).toBe("kimi-code");
+    expect(agent!.defaultModel).toBe("kimi-k2.6");
+    expect(agent!.factoryImport).toBe("kimiCode");
+    expect(agent!.dockerfileTemplate).toContain("FROM");
+    expect(agent!.dockerfileTemplate).toContain("code.kimi.com/install.sh");
+    expect(agent!.envExample).toContain("KIMI_API_KEY");
   });
 });
 
@@ -703,6 +720,31 @@ describe("InitService scaffold", () => {
       "utf-8",
     );
     expect(mainTs).toContain('codex("gpt-5.4-mini")');
+    expect(mainTs).not.toContain("claudeCode");
+  });
+
+  it("scaffolds kimi-code agent with kimi Dockerfile", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, { agent: kimiCodeAgent, model: "kimi-k2.6" });
+
+    const dockerfile = await readFile(
+      join(dir, ".sandcastle", "Dockerfile"),
+      "utf-8",
+    );
+    expect(dockerfile).toContain("FROM node:22-bookworm");
+    expect(dockerfile).toContain("code.kimi.com/install.sh");
+    expect(dockerfile).not.toContain("{{BACKLOG_MANAGER_TOOLS}}");
+  });
+
+  it("scaffolds main.mts with kimiCode factory import when kimi-code agent selected", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, { agent: kimiCodeAgent, model: "kimi-k2.6" });
+
+    const mainTs = await readFile(
+      join(dir, ".sandcastle", "main.mts"),
+      "utf-8",
+    );
+    expect(mainTs).toContain('kimiCode("kimi-k2.6")');
     expect(mainTs).not.toContain("claudeCode");
   });
 

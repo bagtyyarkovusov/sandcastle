@@ -1378,6 +1378,61 @@ describe("kimiCode factory", () => {
     });
     expect(provider.parseStreamLine(line)).toEqual([]);
   });
+
+  // --- sessionStorage ---
+
+  it("sessionStorage is defined on kimiCode provider", () => {
+    const provider = kimiCode("kimi-k2.6");
+    expect(provider.sessionStorage).toBeDefined();
+    expect(provider.sessionStorage!.hostStore).toBeDefined();
+    expect(provider.sessionStorage!.sandboxStore).toBeDefined();
+    expect(provider.sessionStorage!.transfer).toBeDefined();
+  });
+
+  it("hostStore returns a SessionStore with correct cwd", () => {
+    const store = kimiCode("kimi-k2.6").sessionStorage!.hostStore(
+      "/Users/test/project",
+    );
+    expect(store.cwd).toBe("/Users/test/project");
+    expect(typeof store.sessionFilePath).toBe("function");
+    expect(typeof store.readSession).toBe("function");
+    expect(typeof store.writeSession).toBe("function");
+  });
+
+  it("hostStore.sessionFilePath uses md5(cwd) Kimi layout", () => {
+    const cwd = "/Users/test/my-project";
+    const store = kimiCode("kimi-k2.6").sessionStorage!.hostStore(cwd);
+    const path = store.sessionFilePath("session-123");
+    expect(path).toContain(".kimi");
+    expect(path).toContain("sessions");
+    expect(path).toContain("session-123");
+    expect(path).toContain("context.jsonl");
+    // Different cwd → different path
+    const store2 =
+      kimiCode("kimi-k2.6").sessionStorage!.hostStore("/Users/test/other");
+    expect(store2.sessionFilePath("session-123")).not.toBe(path);
+  });
+
+  it("sandboxStore uses POSIX paths for sandbox side", () => {
+    // sandboxStore needs a handle, but we can test the path construction
+    // with a minimal mock
+    const mockHandle = {
+      copyFileIn: async () => {},
+      copyFileOut: async () => {},
+      exec: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
+    };
+    const store = kimiCode("kimi-k2.6").sessionStorage!.sandboxStore(
+      "/home/agent/repo",
+      mockHandle,
+    );
+    expect(store.cwd).toBe("/home/agent/repo");
+    const path = store.sessionFilePath("session-abc");
+    expect(path).toContain("/home/agent/.kimi/sessions");
+    expect(path).toContain("session-abc");
+    expect(path).toContain("context.jsonl");
+    // Path must use forward slashes (POSIX for Linux containers)
+    expect(path).not.toContain("\\");
+  });
 });
 
 describe("resumeSession on non-Claude providers", () => {
@@ -1414,15 +1469,23 @@ describe("resumeSession on non-Claude providers", () => {
     expect(command).not.toContain("abc-123");
   });
 
-  it("kimiCode ignores resumeSession in buildPrintCommand", () => {
+  it("kimiCode includes -r when resumeSession is set", () => {
     const provider = kimiCode("kimi-k2.6");
     const { command } = provider.buildPrintCommand({
       prompt: "test",
       dangerouslySkipPermissions: true,
       resumeSession: "abc-123",
     });
-    expect(command).not.toContain("--resume");
-    expect(command).not.toContain("abc-123");
+    expect(command).toContain("-r 'abc-123'");
+  });
+
+  it("kimiCode does not include -r when resumeSession is not set", () => {
+    const provider = kimiCode("kimi-k2.6");
+    const { command } = provider.buildPrintCommand({
+      prompt: "test",
+      dangerouslySkipPermissions: true,
+    });
+    expect(command).not.toContain("-r");
   });
 });
 
@@ -1558,7 +1621,13 @@ describe("captureSessions flag", () => {
     expect(opencode("opencode-model").captureSessions).toBe(false);
   });
 
-  it("kimiCode has captureSessions false", () => {
-    expect(kimiCode("kimi-model").captureSessions).toBe(false);
+  it("kimiCode defaults captureSessions to true", () => {
+    expect(kimiCode("kimi-model").captureSessions).toBe(true);
+  });
+
+  it("kimiCode allows opting out of captureSessions", () => {
+    expect(
+      kimiCode("kimi-model", { captureSessions: false }).captureSessions,
+    ).toBe(false);
   });
 });

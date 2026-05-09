@@ -33,8 +33,6 @@ import {
 } from "./AgentStreamEmitter.js";
 import type { SandboxHooks } from "./SandboxLifecycle.js";
 import { mergeProviderEnv } from "./mergeProviderEnv.js";
-import { hostSessionStore } from "./SessionStore.js";
-import { defaultSessionPathsLayer } from "./SessionPaths.js";
 import { generateTempBranchName, getCurrentBranch } from "./WorktreeManager.js";
 import {
   type PromptArgs,
@@ -310,7 +308,9 @@ export function run(
 ): Promise<RunResult & { output: string }>;
 /** Overload: without `output`, returns the standard `RunResult`. */
 export function run(options: RunOptions): Promise<RunResult>;
-export async function run(options: RunOptions): Promise<RunResult & { output?: unknown }> {
+export async function run(
+  options: RunOptions,
+): Promise<RunResult & { output?: unknown }> {
   // If signal is already aborted, reject immediately without any setup
   options.signal?.throwIfAborted();
 
@@ -375,7 +375,13 @@ export async function run(options: RunOptions): Promise<RunResult & { output?: u
 
   // Validate: resumeSession file must exist on the host
   if (options.resumeSession) {
-    const hStore = hostSessionStore(hostRepoDir);
+    const sessionStorage = provider.sessionStorage;
+    if (!sessionStorage) {
+      throw new Error(
+        `resumeSession is not supported by agent provider "${provider.name}"`,
+      );
+    }
+    const hStore = sessionStorage.hostStore(hostRepoDir);
     const sessionPath = hStore.sessionFilePath(options.resumeSession);
     if (!existsSync(sessionPath)) {
       throw new Error(
@@ -487,7 +493,6 @@ export async function run(options: RunOptions): Promise<RunResult & { output?: u
   const runLayer = Layer.mergeAll(
     factoryLayer,
     displayLayer,
-    defaultSessionPathsLayer,
     agentStreamEmitterLayer,
   );
 

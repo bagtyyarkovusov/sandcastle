@@ -5,6 +5,18 @@ export type ParsedStreamEvent =
   | { type: "tool_call"; name: string; args: string }
   | { type: "session_id"; sessionId: string };
 
+import type { BindMountSandboxHandle } from "./SandboxProvider.js";
+import type { SessionStore } from "./SessionStore.js";
+import {
+  hostSessionStore,
+  sandboxSessionStore,
+  transferSession,
+} from "./SessionStore.js";
+import { join, posix } from "node:path";
+import { createHash } from "node:crypto";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+
 const shellEscape = (s: string): string => "'" + s.replace(/'/g, "'\\''") + "'";
 
 /** Maps allowlisted tool names to the input field containing the display arg */
@@ -119,6 +131,18 @@ export interface AgentProvider {
   readonly env: Record<string, string>;
   /** When true, session capture is enabled for this provider. Default: true for Claude Code, false for others. */
   readonly captureSessions: boolean;
+  /** Provider-owned session storage factories. When undefined, session capture is skipped. */
+  readonly sessionStorage?: {
+    hostStore(cwd: string): SessionStore;
+    sandboxStore(
+      cwd: string,
+      handle: Pick<
+        BindMountSandboxHandle,
+        "copyFileIn" | "copyFileOut" | "exec"
+      >,
+    ): SessionStore;
+    transfer(from: SessionStore, to: SessionStore, id: string): Promise<void>;
+  };
   buildPrintCommand(options: AgentCommandOptions): PrintCommand;
   buildInteractiveArgs?(options: AgentCommandOptions): string[];
   parseStreamLine(line: string): ParsedStreamEvent[];
@@ -353,6 +377,11 @@ export interface ClaudeCodeOptions {
   readonly env?: Record<string, string>;
   /** When false, session capture is disabled. Default: true. */
   readonly captureSessions?: boolean;
+  /** Override default session directories. */
+  readonly sessionPaths?: {
+    hostProjectsDir?: string;
+    sandboxProjectsDir?: string;
+  };
 }
 
 export const claudeCode = (
@@ -362,6 +391,29 @@ export const claudeCode = (
   name: "claude-code",
   env: options?.env ?? {},
   captureSessions: options?.captureSessions ?? true,
+
+  sessionStorage: {
+    hostStore: (cwd: string): SessionStore =>
+      hostSessionStore(
+        cwd,
+        options?.sessionPaths?.hostProjectsDir ??
+          join(process.env.HOME ?? "~", ".claude", "projects"),
+      ),
+    sandboxStore: (
+      cwd: string,
+      handle: Pick<
+        BindMountSandboxHandle,
+        "copyFileIn" | "copyFileOut" | "exec"
+      >,
+    ): SessionStore =>
+      sandboxSessionStore(
+        cwd,
+        handle,
+        options?.sessionPaths?.sandboxProjectsDir ??
+          posix.join("/home/agent", ".claude", "projects"),
+      ),
+    transfer: transferSession,
+  },
 
   buildPrintCommand({
     prompt,
@@ -558,12 +610,18 @@ const parseKimiStreamLine = (line: string): ParsedStreamEvent[] => {
   return [];
 };
 
+/** MD5 hash of the working directory, matching Kimi's session storage layout. */
+const kimiSessionHash = (cwd: string): string =>
+  createHash("md5").update(cwd).digest("hex");
+
 /** Options for the kimi agent provider. */
 export interface KimiCodeOptions {
   /** Environment variables injected by this agent provider. */
   readonly env?: Record<string, string>;
   /** Enable thinking mode (model will emit reasoning in stream). Default: true. */
   readonly thinking?: boolean;
+  /** When false, session capture is disabled. Default: true. */
+  readonly captureSessions?: boolean;
 }
 
 export const kimiCode = (
@@ -572,13 +630,91 @@ export const kimiCode = (
 ): AgentProvider => ({
   name: "kimi-code",
   env: options?.env ?? {},
-  captureSessions: false,
+  captureSessions: options?.captureSessions ?? true,
 
-  buildPrintCommand({ prompt }: AgentCommandOptions): PrintCommand {
+  sessionStorage: {
+    hostStore: (cwd: string): SessionStore => {
+      const hash = kimiSessionHash(cwd);
+      const sessionsDir = join(process.env.HOME ?? "~", ".kimi", "sessions");
+      return {
+        cwd,
+        sessionFilePath: (id: string): string =>
+          join(sessionsDir, hash, id, "context.jsonl"),
+        readSession: async (id: string): Promise<string> =>
+          readFile(join(sessionsDir, hash, id, "context.jsonl"), "utf-8"),
+        writeSession: async (id: string, content: string): Promise<void> => {
+          await mkdir(join(sessionsDir, hash, id), { recursive: true });
+          await writeFile(
+            join(sessionsDir, hash, id, "context.jsonl"),
+            content,
+          );
+        },
+      };
+    },
+    sandboxStore: (
+      cwd: string,
+      handle: Pick<
+        BindMountSandboxHandle,
+        "copyFileIn" | "copyFileOut" | "exec"
+      >,
+    ): SessionStore => {
+      const hash = kimiSessionHash(cwd);
+      const sessionsDir = posix.join("/home/agent", ".kimi", "sessions");
+      const projectDir = posix.join(sessionsDir, hash);
+      return {
+        cwd,
+        sessionFilePath: (id: string): string =>
+          posix.join(projectDir, id, "context.jsonl"),
+        readSession: async (id: string): Promise<string> => {
+          const sandboxPath = posix.join(projectDir, id, "context.jsonl");
+          const tmpPath = join(
+            tmpdir(),
+            `sandcastle-kimi-${id}-${Date.now()}.jsonl`,
+          );
+          await handle.copyFileOut(sandboxPath, tmpPath);
+          try {
+            return await readFile(tmpPath, "utf-8");
+          } finally {
+            await rm(tmpPath, { force: true }).catch(() => {});
+          }
+        },
+        writeSession: async (id: string, content: string): Promise<void> => {
+          const sandboxPath = posix.join(projectDir, id, "context.jsonl");
+          const tmpPath = join(
+            tmpdir(),
+            `sandcastle-kimi-${id}-${Date.now()}.jsonl`,
+          );
+          await writeFile(tmpPath, content);
+          try {
+            await handle.exec(
+              `mkdir -p ${JSON.stringify(posix.join(projectDir, id))}`,
+            );
+            await handle.copyFileIn(tmpPath, sandboxPath);
+          } finally {
+            await rm(tmpPath, { force: true }).catch(() => {});
+          }
+        },
+      };
+    },
+    transfer: async (
+      from: SessionStore,
+      to: SessionStore,
+      id: string,
+    ): Promise<void> => {
+      const content = await from.readSession(id);
+      await to.writeSession(id, content);
+    },
+  },
+
+  buildPrintCommand({
+    prompt,
+    resumeSession,
+  }: AgentCommandOptions): PrintCommand {
     const thinking = options?.thinking !== false; // default on
     const thinkingFlag = thinking ? " --thinking" : " --no-thinking";
+    const resumeFlag = resumeSession ? ` -r ${shellEscape(resumeSession)}` : "";
     return {
-      command: `kimi --print --input-format stream-json --output-format stream-json${thinkingFlag} --model ${shellEscape(model)}`,
+      command: `kimi --print --input-format stream-json --output-format stream-json${thinkingFlag} --model ${shellEscape(model)}${resumeFlag}`,
       stdin: JSON.stringify({ role: "user", content: prompt }) + "\n",
     };
   },

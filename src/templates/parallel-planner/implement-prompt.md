@@ -18,7 +18,13 @@ Here are the last 10 commits:
 
 </recent-commits>
 
+If this project has a `docs/adr/` directory, read any ADRs relevant to the area you're touching before making architectural decisions.
+
 # EXPLORATION
+
+Use `{{VIEW_TASK_COMMAND}}` to read the issue. If it has a parent PRD (check the "Depends on" line), pull the parent PRD too and read it fully before you start — it contains the architecture, testing strategy, and module decisions for this slice.
+
+If you encounter unfamiliar libraries or need current API docs, use Context7: call `resolve-library-id` with the library name, then `query-docs` with your question.
 
 Explore the repo and fill your context window with relevant information that will allow you to complete the task.
 

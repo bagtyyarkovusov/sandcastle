@@ -30,6 +30,8 @@ Review the code changes on branch `{{BRANCH}}` and improve code clarity, consist
    - Are new/changed behaviours covered by tests?
    - Are there unsafe casts, `any` types, or unchecked assumptions?
    - Does the change introduce injection vulnerabilities, credential leaks, or other security issues?
+   - Does the change respect any relevant ADRs in `docs/adr/`?
+   - If the change uses libraries or frameworks, verify the implementation against current docs — use Context7 (`resolve-library-id` / `query-docs`) if something looks off or uses deprecated APIs.
 
 4. **Maintain balance**: Avoid over-simplification that could:
    - Reduce code clarity or maintainability

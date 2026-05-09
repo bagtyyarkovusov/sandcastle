@@ -12,6 +12,8 @@ worktrees/
 export interface TemplateMetadata {
   name: string;
   description: string;
+  /** If set, this template only appears when one of these agents is selected. */
+  compatibleAgents?: string[];
 }
 
 const TEMPLATES: TemplateMetadata[] = [
@@ -38,9 +40,21 @@ const TEMPLATES: TemplateMetadata[] = [
     description:
       "Plans parallelizable issues, executes with per-branch review, merges",
   },
+  {
+    name: "context7-enhanced",
+    description:
+      "Documentation-aware parallel planner — uses Context7 MCP for live library docs during implementation and review",
+    compatibleAgents: ["kimi-code"],
+  },
 ];
 
-export const listTemplates = (): TemplateMetadata[] => TEMPLATES;
+export const listTemplates = (agentName?: string): TemplateMetadata[] =>
+  TEMPLATES.filter(
+    (t) =>
+      !t.compatibleAgents ||
+      agentName === undefined ||
+      t.compatibleAgents.includes(agentName),
+  );
 
 // ---------------------------------------------------------------------------
 // Agent registry (internal — not part of public API)

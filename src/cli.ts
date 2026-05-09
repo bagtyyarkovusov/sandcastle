@@ -230,7 +230,7 @@ const initCommand = Command.make(
           clack.select({
             message: "Select a template:",
             initialValue: "blank",
-            options: templates.map((tmpl) => ({
+            options: listTemplates(selectedAgent.name).map((tmpl) => ({
               value: tmpl.name,
               label: tmpl.name,
               hint: tmpl.description,

@@ -44,6 +44,11 @@ Review the code changes on branch `{{BRANCH}}` and improve code clarity, consist
 
 6. **Preserve functionality**: Never change what the code does - only how it does it. All original features, outputs, and behaviors must remain intact.
 
+7. **Verify library usage**: For any imported library, use Context7 to check:
+   - Are the APIs being called correctly for the installed version?
+   - Are there deprecated methods being used?
+   - Are there more idiomatic patterns available in the current version?
+
 # EXECUTION
 
 If you find improvements to make:

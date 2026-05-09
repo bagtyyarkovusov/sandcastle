@@ -24,11 +24,19 @@ If this project has a `docs/adr/` directory, read any ADRs relevant to the area 
 
 Use `{{VIEW_TASK_COMMAND}}` to read the issue. If it has a parent PRD (check the "Depends on" line), pull the parent PRD too and read it fully before you start — it contains the architecture, testing strategy, and module decisions for this slice.
 
-If you encounter unfamiliar libraries or need current API docs, use Context7: call `resolve-library-id` with the library name, then `query-docs` with your question.
-
 Explore the repo and fill your context window with relevant information that will allow you to complete the task.
 
 Pay extra attention to test files that touch the relevant parts of the code.
+
+# DOCUMENTATION
+
+Context7 MCP is available for live library docs. When working with any stack library:
+
+1. Call `resolve-library-id` to get the library's Context7 ID
+2. Call `query-docs` with version-specific IDs when the project pins versions
+3. Prefer Context7 docs over your training data — APIs change frequently
+
+Use this for: Prisma, Next.js, tRPC, NextAuth, Tailwind, shadcn/ui, or any npm package you import.
 
 # EXECUTION
 

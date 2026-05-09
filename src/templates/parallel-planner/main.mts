@@ -67,16 +67,21 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   });
 
   // Extract the <plan>…</plan> block from the agent's stdout.
-  const planMatch = plan.stdout.match(/<plan>([\s\S]*?)<\/plan>/);
-  if (!planMatch) {
+  // Use matchAll + last match: the planner's thinking may mention <plan>
+  // inline, so the first match isn't the real plan block.
+  const planMatches = [...plan.stdout.matchAll(/<plan>([\s\S]*?)<\/plan>/g)];
+  const planBlock = planMatches[planMatches.length - 1]?.[1];
+  if (!planBlock) {
     throw new Error(
       "Planning agent did not produce a <plan> tag.\n\n" + plan.stdout,
     );
   }
 
   // The plan JSON contains an array of issues, each with id, title, branch.
-  // Unescape JSON-encoded control characters (agents may output literal \n, \", etc.).
-  const planJson = planMatch[1]!
+  // Strip code fences (agent may wrap JSON in ```json … ```) then unescape
+  // JSON-encoded control characters (agents may output literal \n, \", etc.).
+  const planJson = planBlock
+    .replace(/```(?:json)?\s*/g, "")
     .replace(/\\n/g, "\n")
     .replace(/\\"/g, '"')
     .replace(/\\t/g, "\t")

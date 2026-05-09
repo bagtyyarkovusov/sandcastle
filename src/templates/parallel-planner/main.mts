@@ -75,7 +75,13 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   }
 
   // The plan JSON contains an array of issues, each with id, title, branch.
-  const { issues } = JSON.parse(planMatch[1]!) as {
+  // Unescape JSON-encoded control characters (agents may output literal \n, \", etc.).
+  const planJson = planMatch[1]!
+    .replace(/\\n/g, "\n")
+    .replace(/\\"/g, '"')
+    .replace(/\\t/g, "\t")
+    .trim();
+  const { issues } = JSON.parse(planJson) as {
     issues: { id: string; title: string; branch: string }[];
   };
 

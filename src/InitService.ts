@@ -235,7 +235,8 @@ RUN export PATH="/home/agent/.local/bin:\$PATH" && curl -LsSf https://code.kimi.
 
 # Minimal Kimi config — API key injected at runtime via KIMI_API_KEY env var
 RUN mkdir -p /home/agent/.kimi && \\
-    printf 'default_model = "kimi-k2.6"\\n\\n[providers.kimi]\\ntype = "kimi"\\nbase_url = "https://api.kimi.com/coding/v1"\\napi_key = ""\\n\\n[models."kimi-k2.6"]\\nprovider = "kimi"\\nmodel = "kimi-k2.6"\\nmax_context_size = 262144\\n' > /home/agent/.kimi/config.toml
+    printf 'default_model = "kimi-k2.6"\\n\\n[providers.kimi]\\ntype = "kimi"\\nbase_url = "https://api.kimi.com/coding/v1"\\napi_key = ""\\n\\n[models."kimi-k2.6"]\\nprovider = "kimi"\\nmodel = "kimi-k2.6"\\nmax_context_size = 262144\\n' > /home/agent/.kimi/config.toml && \\
+    printf '{"mcpServers":{"context7":{"command":"npx","args":["-y","@upstash/context7-mcp"]}}}\\n' > /home/agent/.kimi/mcp.json
 
 ENV PATH="/home/agent/.local/bin:\${PATH}"
 
@@ -289,7 +290,9 @@ OPENCODE_API_KEY=`,
     factoryImport: "kimiCode",
     dockerfileTemplate: KIMI_CODE_DOCKERFILE,
     envExample: `# Kimi / Moonshot AI API key
-KIMI_API_KEY=`,
+KIMI_API_KEY=
+# Context7 API key (optional — gives the agent access to live documentation)
+CONTEXT7_API_KEY=`,
   },
 ];
 

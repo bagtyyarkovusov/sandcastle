@@ -388,21 +388,50 @@ export const withSandboxLifecycle = <A>(
       yield* execOk(sandbox, "git checkout --detach", { cwd: sandboxRepoDir });
 
       if (hasNewCommits) {
-        // Fast-forward host's current branch to the temp branch
+        // Fast-forward host's current branch to the temp branch.
+        // git merge requires a clean working tree, so we auto-stash
+        // any uncommitted changes on the host and restore them after.
         yield* display.taskLog(`Merging to ${hostCurrentBranch}`, () =>
           Effect.tryPromise({
             try: async () => {
+              const stashMessage =
+                "sandcastle: auto-stash before merge-to-head";
+              let stashed = false;
+
               try {
-                await execAsync(`git merge "${resolvedBranch}"`, {
-                  cwd: hostRepoDir,
-                });
-              } catch {
-                throw new Error(
-                  `Merge of '${resolvedBranch}' onto '${hostCurrentBranch}' failed. ` +
-                    `The temporary branch '${resolvedBranch}' has been preserved. ` +
-                    `To retry: git merge ${resolvedBranch}, ` +
-                    `then clean up: git branch -D ${resolvedBranch}`,
+                await execAsync(
+                  `git stash push --include-untracked -m "${stashMessage}"`,
+                  { cwd: hostRepoDir },
                 );
+                stashed = true;
+              } catch {
+                // Nothing to stash — that's fine, proceed with merge
+              }
+
+              try {
+                try {
+                  await execAsync(`git merge "${resolvedBranch}"`, {
+                    cwd: hostRepoDir,
+                  });
+                } catch {
+                  throw new Error(
+                    `Merge of '${resolvedBranch}' onto '${hostCurrentBranch}' failed. ` +
+                      `The temporary branch '${resolvedBranch}' has been preserved. ` +
+                      `To retry: git merge ${resolvedBranch}, ` +
+                      `then clean up: git branch -D ${resolvedBranch}`,
+                  );
+                }
+              } finally {
+                if (stashed) {
+                  try {
+                    await execAsync("git stash pop --index", {
+                      cwd: hostRepoDir,
+                    });
+                  } catch {
+                    // Stash pop conflict — changes are preserved in the stash
+                    // for manual recovery. Don't fail the run over this.
+                  }
+                }
               }
             },
             catch: (e) =>

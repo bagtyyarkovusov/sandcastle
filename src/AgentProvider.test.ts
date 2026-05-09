@@ -828,19 +828,22 @@ describe("kimiCode factory", () => {
     expect(provider).not.toHaveProperty("dockerfileTemplate");
   });
 
-  it("buildPrintCommand includes the model and --output-format stream-json", () => {
+  it("buildPrintCommand includes the model, --input-format, and --output-format stream-json", () => {
     const provider = kimiCode("kimi-k2.6");
     const { command } = provider.buildPrintCommand(opts("do something"));
     expect(command).toContain("kimi-k2.6");
+    expect(command).toContain("--input-format stream-json");
     expect(command).toContain("--output-format stream-json");
     expect(command).toContain("--print");
   });
 
-  it("buildPrintCommand delivers prompt via stdin, not argv", () => {
+  it("buildPrintCommand delivers prompt as JSONL via stdin, not argv", () => {
     const provider = kimiCode("kimi-k2.6");
     const { command, stdin } = provider.buildPrintCommand(opts("it's a test"));
     expect(command).not.toContain("it's a test");
-    expect(stdin).toBe("it's a test");
+    expect(stdin).toBe(
+      JSON.stringify({ role: "user", content: "it's a test" }) + "\n",
+    );
   });
 
   it("buildPrintCommand does NOT use -p flag for stdin (Kimi reads stdin directly)", () => {
@@ -1108,6 +1111,272 @@ describe("kimiCode factory", () => {
   it("defaults env to empty object when not provided", () => {
     const provider = kimiCode("kimi-k2.6");
     expect(provider.env).toEqual({});
+  });
+
+  it("buildPrintCommand includes --thinking by default", () => {
+    const provider = kimiCode("kimi-k2.6");
+    const { command } = provider.buildPrintCommand({
+      prompt: "test",
+      dangerouslySkipPermissions: true,
+    });
+    expect(command).toContain("--thinking");
+    expect(command).not.toContain("--no-thinking");
+  });
+
+  it("buildPrintCommand includes --no-thinking when thinking: false", () => {
+    const provider = kimiCode("kimi-k2.6", { thinking: false });
+    const { command } = provider.buildPrintCommand({
+      prompt: "test",
+      dangerouslySkipPermissions: true,
+    });
+    expect(command).toContain("--no-thinking");
+    expect(command).not.toContain(" --thinking");
+  });
+
+  it("parseStreamLine extracts thinking from think content block", () => {
+    const provider = kimiCode("kimi-k2.6");
+    const line = JSON.stringify({
+      role: "assistant",
+      content: [
+        {
+          type: "think",
+          think: "Let me think about this step by step.",
+          encrypted: null,
+        },
+        { type: "text", text: "The answer is 42." },
+      ],
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "thinking", text: "Let me think about this step by step." },
+      { type: "text", text: "The answer is 42." },
+    ]);
+  });
+
+  it("parseStreamLine handles thinking-only content (no text block)", () => {
+    const provider = kimiCode("kimi-k2.6");
+    const line = JSON.stringify({
+      role: "assistant",
+      content: [
+        {
+          type: "think",
+          think: "I need to run a command to check.",
+          encrypted: null,
+        },
+      ],
+      tool_calls: [
+        {
+          type: "function",
+          id: "call_1",
+          function: { name: "Shell", arguments: '{"command": "ls"}' },
+        },
+      ],
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "thinking", text: "I need to run a command to check." },
+      { type: "tool_call", name: "Shell", args: "ls" },
+    ]);
+  });
+
+  it("parseStreamLine handles think block with empty or null think field", () => {
+    const provider = kimiCode("kimi-k2.6");
+    const line = JSON.stringify({
+      role: "assistant",
+      content: [
+        { type: "think", think: "", encrypted: null },
+        { type: "text", text: "Done." },
+      ],
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "text", text: "Done." },
+    ]);
+  });
+
+  // --- Wire protocol: ContentPart events ---
+
+  it("parseStreamLine extracts thinking from Wire ContentPart think event", () => {
+    const provider = kimiCode("kimi-k2.6");
+    const line = JSON.stringify({
+      type: "ContentPart",
+      payload: { type: "think", think: "I should check the file first." },
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "thinking", text: "I should check the file first." },
+    ]);
+  });
+
+  it("parseStreamLine extracts text from Wire ContentPart text event", () => {
+    const provider = kimiCode("kimi-k2.6");
+    const line = JSON.stringify({
+      type: "ContentPart",
+      payload: { type: "text", text: "Let me run that command." },
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "text", text: "Let me run that command." },
+    ]);
+  });
+
+  it("parseStreamLine skips Wire ContentPart with empty think text", () => {
+    const provider = kimiCode("kimi-k2.6");
+    const line = JSON.stringify({
+      type: "ContentPart",
+      payload: { type: "think", think: "" },
+    });
+    expect(provider.parseStreamLine(line)).toEqual([]);
+  });
+
+  it("parseStreamLine skips Wire ContentPart with empty text", () => {
+    const provider = kimiCode("kimi-k2.6");
+    const line = JSON.stringify({
+      type: "ContentPart",
+      payload: { type: "text", text: "" },
+    });
+    expect(provider.parseStreamLine(line)).toEqual([]);
+  });
+
+  it("parseStreamLine skips Wire ContentPart with unknown payload type", () => {
+    const provider = kimiCode("kimi-k2.6");
+    const line = JSON.stringify({
+      type: "ContentPart",
+      payload: { type: "image", url: "https://example.com/img.png" },
+    });
+    expect(provider.parseStreamLine(line)).toEqual([]);
+  });
+
+  it("parseStreamLine skips Wire ContentPart with missing payload", () => {
+    const provider = kimiCode("kimi-k2.6");
+    const line = JSON.stringify({ type: "ContentPart" });
+    expect(provider.parseStreamLine(line)).toEqual([]);
+  });
+
+  // --- Wire protocol: ToolCall events ---
+
+  it("parseStreamLine extracts Shell tool call from Wire ToolCall event", () => {
+    const provider = kimiCode("kimi-k2.6");
+    const line = JSON.stringify({
+      type: "ToolCall",
+      payload: {
+        type: "function",
+        id: "call_1",
+        function: {
+          name: "Shell",
+          arguments: JSON.stringify({ command: "npm install" }),
+        },
+      },
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "tool_call", name: "Shell", args: "npm install" },
+    ]);
+  });
+
+  it("parseStreamLine extracts FetchURL tool call from Wire ToolCall event", () => {
+    const provider = kimiCode("kimi-k2.6");
+    const line = JSON.stringify({
+      type: "ToolCall",
+      payload: {
+        type: "function",
+        id: "call_2",
+        function: {
+          name: "FetchURL",
+          arguments: JSON.stringify({ url: "https://example.com" }),
+        },
+      },
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "tool_call", name: "FetchURL", args: "https://example.com" },
+    ]);
+  });
+
+  it("parseStreamLine extracts SearchWeb tool call from Wire ToolCall event", () => {
+    const provider = kimiCode("kimi-k2.6");
+    const line = JSON.stringify({
+      type: "ToolCall",
+      payload: {
+        type: "function",
+        id: "call_3",
+        function: {
+          name: "SearchWeb",
+          arguments: JSON.stringify({ query: "latest docs" }),
+        },
+      },
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "tool_call", name: "SearchWeb", args: "latest docs" },
+    ]);
+  });
+
+  it("parseStreamLine extracts ReadFile tool call from Wire ToolCall event", () => {
+    const provider = kimiCode("kimi-k2.6");
+    const line = JSON.stringify({
+      type: "ToolCall",
+      payload: {
+        type: "function",
+        id: "call_4",
+        function: {
+          name: "ReadFile",
+          arguments: JSON.stringify({ path: "/tmp/test.txt" }),
+        },
+      },
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "tool_call", name: "ReadFile", args: "/tmp/test.txt" },
+    ]);
+  });
+
+  it("parseStreamLine skips Wire ToolCall with non-allowlisted tool name", () => {
+    const provider = kimiCode("kimi-k2.6");
+    const line = JSON.stringify({
+      type: "ToolCall",
+      payload: {
+        type: "function",
+        id: "call_5",
+        function: {
+          name: "UnknownTool",
+          arguments: JSON.stringify({ foo: "bar" }),
+        },
+      },
+    });
+    expect(provider.parseStreamLine(line)).toEqual([]);
+  });
+
+  it("parseStreamLine skips Wire ToolCall with invalid JSON arguments", () => {
+    const provider = kimiCode("kimi-k2.6");
+    const line = JSON.stringify({
+      type: "ToolCall",
+      payload: {
+        type: "function",
+        id: "call_6",
+        function: { name: "Shell", arguments: "{bad json" },
+      },
+    });
+    expect(provider.parseStreamLine(line)).toEqual([]);
+  });
+
+  it("parseStreamLine skips Wire ToolCall with missing function name", () => {
+    const provider = kimiCode("kimi-k2.6");
+    const line = JSON.stringify({
+      type: "ToolCall",
+      payload: {
+        type: "function",
+        id: "call_7",
+        function: { arguments: JSON.stringify({ command: "ls" }) },
+      },
+    });
+    expect(provider.parseStreamLine(line)).toEqual([]);
+  });
+
+  it("parseStreamLine skips Wire ToolCall with missing payload", () => {
+    const provider = kimiCode("kimi-k2.6");
+    const line = JSON.stringify({ type: "ToolCall" });
+    expect(provider.parseStreamLine(line)).toEqual([]);
+  });
+
+  it("parseStreamLine skips Wire ToolCall with non-function payload type", () => {
+    const provider = kimiCode("kimi-k2.6");
+    const line = JSON.stringify({
+      type: "ToolCall",
+      payload: { type: "other", name: "Shell", arguments: "{}" },
+    });
+    expect(provider.parseStreamLine(line)).toEqual([]);
   });
 });
 

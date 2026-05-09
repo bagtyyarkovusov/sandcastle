@@ -106,6 +106,8 @@ const invokeAgent = (
           for (const parsed of provider.parseStreamLine(line)) {
             if (parsed.type === "text") {
               onText(parsed.text);
+            } else if (parsed.type === "thinking") {
+              onText(parsed.text);
             } else if (parsed.type === "result") {
               resultText = parsed.result;
             } else if (parsed.type === "tool_call") {
@@ -127,9 +129,7 @@ const invokeAgent = (
           errorDetail = resultText;
         }
         if (!errorDetail.trim()) {
-          const lines = execResult.stdout
-            .split("\n")
-            .filter((l) => l.trim());
+          const lines = execResult.stdout.split("\n").filter((l) => l.trim());
           errorDetail = lines.slice(-20).join("\n");
         }
         return yield* Effect.fail(

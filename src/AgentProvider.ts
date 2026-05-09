@@ -1,5 +1,6 @@
 export type ParsedStreamEvent =
   | { type: "text"; text: string }
+  | { type: "thinking"; text: string }
   | { type: "result"; result: string }
   | { type: "tool_call"; name: string; args: string }
   | { type: "session_id"; sessionId: string };
@@ -441,7 +442,6 @@ const KIMI_TOOL_ARGS: Record<string, string> = {
 
 const parseKimiStreamLine = (line: string): ParsedStreamEvent[] => {
   if (!line.startsWith("{")) {
-    // Session resume hint: "To resume this session: kimi -r <id>"
     const m = line.match(/^To resume this session: kimi -r (\S+)/);
     if (m) return [{ type: "session_id", sessionId: m[1]! }];
     return [];
@@ -454,12 +454,74 @@ const parseKimiStreamLine = (line: string): ParsedStreamEvent[] => {
     return [];
   }
 
-  // Assistant message — text content and/or tool calls
+  // Wire protocol: ContentPart events streamed in real-time
+  // (when --input-format stream-json is used)
+  if (obj.type === "ContentPart" && obj.payload) {
+    const p = obj.payload;
+    if (
+      p.type === "think" &&
+      typeof p.think === "string" &&
+      p.think.length > 0
+    ) {
+      return [{ type: "thinking", text: p.think }];
+    }
+    if (p.type === "text" && typeof p.text === "string" && p.text.length > 0) {
+      return [{ type: "text", text: p.text }];
+    }
+    return [];
+  }
+
+  // Wire protocol: ToolCall events
+  if (obj.type === "ToolCall" && obj.payload) {
+    const tc = obj.payload;
+    if (
+      tc.type === "function" &&
+      typeof tc.function?.name === "string" &&
+      tc.function?.arguments !== undefined
+    ) {
+      const name: string = tc.function.name;
+      const argField = KIMI_TOOL_ARGS[name];
+      if (argField) {
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(tc.function.arguments);
+        } catch {
+          return [];
+        }
+        if (typeof parsed === "object" && parsed !== null) {
+          const args = (parsed as Record<string, unknown>)[argField];
+          if (typeof args === "string") {
+            return [{ type: "tool_call", name, args }];
+          }
+        }
+      }
+    }
+    return [];
+  }
+
+  // Legacy print mode: assistant message with content and/or tool calls
   if (obj.role === "assistant") {
     const events: ParsedStreamEvent[] = [];
 
-    // Text content — can be a string or an empty array (when tool calls present)
-    if (typeof obj.content === "string" && obj.content.length > 0) {
+    // Content can be a plain string or an array of content blocks.
+    // With --thinking, think blocks contain the model's reasoning.
+    if (Array.isArray(obj.content)) {
+      for (const block of obj.content) {
+        if (
+          block.type === "think" &&
+          typeof block.think === "string" &&
+          block.think.length > 0
+        ) {
+          events.push({ type: "thinking", text: block.think });
+        } else if (
+          block.type === "text" &&
+          typeof block.text === "string" &&
+          block.text.length > 0
+        ) {
+          events.push({ type: "text", text: block.text });
+        }
+      }
+    } else if (typeof obj.content === "string" && obj.content.length > 0) {
       events.push({ type: "text", text: obj.content });
     }
 
@@ -493,7 +555,6 @@ const parseKimiStreamLine = (line: string): ParsedStreamEvent[] => {
     return events;
   }
 
-  // role === "tool" — skip tool result messages
   return [];
 };
 
@@ -501,6 +562,8 @@ const parseKimiStreamLine = (line: string): ParsedStreamEvent[] => {
 export interface KimiCodeOptions {
   /** Environment variables injected by this agent provider. */
   readonly env?: Record<string, string>;
+  /** Enable thinking mode (model will emit reasoning in stream). Default: true. */
+  readonly thinking?: boolean;
 }
 
 export const kimiCode = (
@@ -512,14 +575,19 @@ export const kimiCode = (
   captureSessions: false,
 
   buildPrintCommand({ prompt }: AgentCommandOptions): PrintCommand {
+    const thinking = options?.thinking !== false; // default on
+    const thinkingFlag = thinking ? " --thinking" : " --no-thinking";
     return {
-      command: `kimi --print --output-format stream-json --model ${shellEscape(model)}`,
-      stdin: prompt,
+      command: `kimi --print --input-format stream-json --output-format stream-json${thinkingFlag} --model ${shellEscape(model)}`,
+      stdin: JSON.stringify({ role: "user", content: prompt }) + "\n",
     };
   },
 
   buildInteractiveArgs({ prompt }: AgentCommandOptions): string[] {
-    const args = ["kimi", "--model", model];
+    const thinking = options?.thinking !== false;
+    const args = thinking
+      ? ["kimi", "--thinking", "--model", model]
+      : ["kimi", "--no-thinking", "--model", model];
     if (prompt) args.push(prompt);
     return args;
   },

@@ -52,6 +52,30 @@ If you find improvements to make:
 2. Run tests and type checking to ensure nothing is broken
 3. Commit describing the refinements
 
+# CONTAINER LIMITATIONS
+
+Both the implementer and reviewer run inside the same Linux Docker container.
+The code must work without:
+
+- Docker, iOS/Android native builds, or long-running dev servers
+- Host services or external APIs not available in the container
+
+Verify the implementation respects these constraints.
+
+# MERGE GATE CHECKLIST
+
+Before approving this branch for merge, verify ALL of the following:
+
+1. `pnpm typecheck` passes with zero errors across all packages
+2. Relevant app builds pass (`pnpm --filter <modified-app> build`)
+3. Relevant tests pass (`pnpm --filter <modified-app> test`)
+4. No `.env`, `.env.local`, or secrets files were added to git
+5. `pnpm-lock.yaml` is updated if any `package.json` changed
+6. No generated directories (`.next/`, `.expo/`, `android/`, `ios/`) were committed
+7. The change respects relevant ADRs in `docs/adr/`
+
+If ANY check fails, REJECT the merge and output the exact errors. Do not approve.
+
 If the code is already clean and well-structured, do nothing.
 
 Once complete, output <promise>COMPLETE</promise>.

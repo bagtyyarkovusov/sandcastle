@@ -34,4 +34,10 @@ Output your plan as a JSON object wrapped in `<plan>` tags:
 {"issues": [{"id": "42", "title": "Fix auth bug", "branch": "sandcastle/issue-42-fix-auth-bug"}]}
 </plan>
 
+# SPRINT CONTEXT
+
+When building the dependency graph, note which sprint each issue belongs to
+(check for `phase-1`, `phase-2`, etc. labels). Prioritize issues in the
+current phase first.
+
 Include only unblocked issues. If every issue is blocked, include the single highest-priority candidate (the one with the fewest or weakest dependencies).

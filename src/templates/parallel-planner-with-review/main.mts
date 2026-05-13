@@ -32,16 +32,45 @@ import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 // Raise this if your backlog is large; lower it for a quick smoke-test run.
 const MAX_ITERATIONS = 10;
 
+// Merger sandbox gets Docker socket access so it can build images and run
+// host-level validation (integration tests, compose up, etc.).
+const mergerSandbox = docker({
+  mounts: [
+    {
+      hostPath: "/var/run/docker.sock",
+      sandboxPath: "/var/run/docker.sock",
+      readonly: true,
+    },
+  ],
+});
+
 // Hooks run inside the sandbox before the agent starts each iteration.
 // npm install ensures the sandbox always has fresh dependencies.
 const hooks = {
-  sandbox: { onSandboxReady: [{ command: "npm install" }] },
+  sandbox: {
+    onSandboxReady: [
+      { command: "pnpm install --frozen-lockfile" },
+    ],
+  },
 };
 
 // Copy node_modules from the host into the worktree before each sandbox
 // starts. Avoids a full npm install from scratch; the hook above handles
 // platform-specific binaries and any packages added since the last copy.
-const copyToWorktree = ["node_modules"];
+const copyToWorktree = [
+  "node_modules",
+  "apps/api/node_modules",
+  "apps/admin/node_modules",
+  "apps/web/node_modules",
+  "apps/mobile/node_modules",
+  "apps/sms-gateway/node_modules",
+  "apps/worker/node_modules",
+  "packages/db/node_modules",
+  "packages/contracts/node_modules",
+  "packages/ui/node_modules",
+  "packages/tsconfig/node_modules",
+  "packages/eslint-config/node_modules",
+];
 
 // ---------------------------------------------------------------------------
 // Main loop
@@ -66,8 +95,8 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     // One iteration is enough: the planner just needs to read and reason,
     // not write code.
     maxIterations: 1,
-    // Opus for planning: dependency analysis benefits from deeper reasoning.
-    agent: sandcastle.claudeCode("claude-opus-4-6"),
+    // Kimi for planning: dependency analysis with thinking disabled for speed.
+    agent: sandcastle.kimiCode("kimi-k2.6", { thinking: false }),
     promptFile: "./.sandcastle/plan-prompt.md",
   });
 
@@ -132,7 +161,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
         const implement = await sandbox.run({
           name: "implementer",
           maxIterations: 100,
-          agent: sandcastle.claudeCode("claude-sonnet-4-6"),
+          agent: sandcastle.kimiCode("kimi-k2.6"),
           promptFile: "./.sandcastle/implement-prompt.md",
           promptArgs: {
             TASK_ID: issue.id,
@@ -146,7 +175,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
           const review = await sandbox.run({
             name: "reviewer",
             maxIterations: 1,
-            agent: sandcastle.claudeCode("claude-sonnet-4-6"),
+            agent: sandcastle.kimiCode("kimi-k2.6"),
             promptFile: "./.sandcastle/review-prompt.md",
             promptArgs: {
               BRANCH: issue.branch,
@@ -214,10 +243,10 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   // -------------------------------------------------------------------------
   await sandcastle.run({
     hooks,
-    sandbox: docker(),
+    sandbox: mergerSandbox,
     name: "merger",
     maxIterations: 1,
-    agent: sandcastle.claudeCode("claude-sonnet-4-6"),
+    agent: sandcastle.kimiCode("kimi-k2.6"),
     promptFile: "./.sandcastle/merge-prompt.md",
     promptArgs: {
       // A markdown list of branch names, one per line.
@@ -230,6 +259,10 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   });
 
   console.log("\nBranches merged.");
+
+  // Sleep between iterations to allow GitHub label changes to propagate
+  // before the planner re-fetches the issue list.
+  await new Promise((r) => setTimeout(r, 5000));
 }
 
 console.log("\nAll done.");

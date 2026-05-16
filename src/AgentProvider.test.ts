@@ -1433,6 +1433,50 @@ describe("kimiCode factory", () => {
     // Path must use forward slashes (POSIX for Linux containers)
     expect(path).not.toContain("\\");
   });
+
+  // --- parseStreamLine: error / agent_error / result events ---
+
+  it("parseStreamLine captures error event with string error as result", () => {
+    const provider = kimiCode("kimi-k2.6");
+    const line = JSON.stringify({
+      type: "error",
+      error: "Something went wrong",
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "result", result: "Something went wrong" },
+    ]);
+  });
+
+  it("parseStreamLine captures agent_error event with object error as result", () => {
+    const provider = kimiCode("kimi-k2.6");
+    const line = JSON.stringify({
+      type: "agent_error",
+      error: { message: "Rate limit exceeded", code: "rate_limit" },
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "result", result: "Rate limit exceeded" },
+    ]);
+  });
+
+  it("parseStreamLine captures result event as result", () => {
+    const provider = kimiCode("kimi-k2.6");
+    const line = JSON.stringify({
+      type: "result",
+      result: "final answer",
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "result", result: "final answer" },
+    ]);
+  });
+
+  it("parseStreamLine returns empty array for error event with no extractable message", () => {
+    const provider = kimiCode("kimi-k2.6");
+    const line = JSON.stringify({
+      type: "error",
+      code: "unknown",
+    });
+    expect(provider.parseStreamLine(line)).toEqual([]);
+  });
 });
 
 describe("resumeSession on non-Claude providers", () => {
@@ -1593,8 +1637,132 @@ describe("parseSessionUsage (Claude Code)", () => {
     expect(opencode("model").parseSessionUsage).toBeUndefined();
   });
 
-  it("is not defined on kimiCode provider", () => {
-    expect(kimiCode("model").parseSessionUsage).toBeUndefined();
+  it("is defined on kimiCode provider", () => {
+    expect(kimiCode("model").parseSessionUsage).toBeDefined();
+  });
+});
+
+describe("parseSessionUsage (Kimi Code)", () => {
+  const provider = kimiCode("kimi-k2.6");
+
+  it("extracts usage from the last assistant message with role field", () => {
+    const content = [
+      JSON.stringify({ role: "user", content: "hello" }),
+      JSON.stringify({
+        role: "assistant",
+        content: "hi",
+        usage: { input_tokens: 10, output_tokens: 5 },
+      }),
+    ].join("\n");
+    expect(provider.parseSessionUsage!(content)).toEqual({
+      inputTokens: 10,
+      cacheCreationInputTokens: 0,
+      cacheReadInputTokens: 0,
+      outputTokens: 5,
+    });
+  });
+
+  it("extracts usage from the last assistant message with type field", () => {
+    const content = [
+      JSON.stringify({ type: "user", content: "hello" }),
+      JSON.stringify({
+        type: "assistant",
+        content: "hi",
+        usage: { input_tokens: 10, output_tokens: 5 },
+      }),
+    ].join("\n");
+    expect(provider.parseSessionUsage!(content)).toEqual({
+      inputTokens: 10,
+      cacheCreationInputTokens: 0,
+      cacheReadInputTokens: 0,
+      outputTokens: 5,
+    });
+  });
+
+  it("returns undefined for empty content", () => {
+    expect(provider.parseSessionUsage!("")).toBeUndefined();
+  });
+
+  it("returns undefined for content with no assistant messages", () => {
+    const content = [
+      JSON.stringify({ role: "user", content: "hello" }),
+      JSON.stringify({ role: "system", content: "sys" }),
+    ].join("\n");
+    expect(provider.parseSessionUsage!(content)).toBeUndefined();
+  });
+
+  it("returns undefined when assistant message has no usage block", () => {
+    const content = JSON.stringify({
+      role: "assistant",
+      content: "hi",
+    });
+    expect(provider.parseSessionUsage!(content)).toBeUndefined();
+  });
+
+  it("returns undefined for malformed JSON lines", () => {
+    const content = "not json\n{bad json\n";
+    expect(provider.parseSessionUsage!(content)).toBeUndefined();
+  });
+
+  it("skips malformed lines and finds valid assistant message", () => {
+    const content = [
+      "not json",
+      JSON.stringify({
+        role: "assistant",
+        usage: { input_tokens: 10, output_tokens: 5 },
+      }),
+    ].join("\n");
+    expect(provider.parseSessionUsage!(content)).toEqual({
+      inputTokens: 10,
+      cacheCreationInputTokens: 0,
+      cacheReadInputTokens: 0,
+      outputTokens: 5,
+    });
+  });
+
+  it("supports camelCase usage fields", () => {
+    const content = JSON.stringify({
+      role: "assistant",
+      usage: { inputTokens: 20, outputTokens: 15 },
+    });
+    expect(provider.parseSessionUsage!(content)).toEqual({
+      inputTokens: 20,
+      cacheCreationInputTokens: 0,
+      cacheReadInputTokens: 0,
+      outputTokens: 15,
+    });
+  });
+
+  it("supports tokens.input and tokens.output fields", () => {
+    const content = JSON.stringify({
+      role: "assistant",
+      tokens: { input: 30, output: 25 },
+    });
+    expect(provider.parseSessionUsage!(content)).toEqual({
+      inputTokens: 30,
+      cacheCreationInputTokens: 0,
+      cacheReadInputTokens: 0,
+      outputTokens: 25,
+    });
+  });
+
+  it("prefers the last assistant message with usage", () => {
+    const content = [
+      JSON.stringify({
+        role: "assistant",
+        usage: { input_tokens: 1, output_tokens: 2 },
+      }),
+      JSON.stringify({
+        role: "assistant",
+        usage: { input_tokens: 3, output_tokens: 4 },
+      }),
+    ].join("\n");
+    expect(provider.parseSessionUsage!(content)).toEqual({
+      inputTokens: 3,
+      cacheCreationInputTokens: 0,
+      cacheReadInputTokens: 0,
+      outputTokens: 4,
+    });
   });
 });
 
@@ -1629,5 +1797,78 @@ describe("captureSessions flag", () => {
     expect(
       kimiCode("kimi-model", { captureSessions: false }).captureSessions,
     ).toBe(false);
+  });
+});
+
+// --- Issue 012: Session ID resilience ---
+
+describe("kimiCode session ID extraction resilience", () => {
+  it("extracts session_id from exact current wording", () => {
+    const provider = kimiCode("kimi-k2.6");
+    const line = "To resume this session: kimi -r abc123";
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "session_id", sessionId: "abc123" },
+    ]);
+  });
+
+  it("extracts session_id from alternative wording", () => {
+    const provider = kimiCode("kimi-k2.6");
+    const line = "Resume with: kimi -r def456";
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "session_id", sessionId: "def456" },
+    ]);
+  });
+
+  it("extracts session_id from loose fallback wording", () => {
+    const provider = kimiCode("kimi-k2.6");
+    const line = "Run: kimi -r ghi789";
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "session_id", sessionId: "ghi789" },
+    ]);
+  });
+
+  it("returns empty array when no session_id pattern matches", () => {
+    const provider = kimiCode("kimi-k2.6");
+    expect(provider.parseStreamLine("No session here")).toEqual([]);
+  });
+});
+
+// --- Issue 013: dangerouslySkipPermissions cleanup ---
+
+describe("kimiCode dangerouslySkipPermissions", () => {
+  it("buildPrintCommand includes --yolo when dangerouslySkipPermissions is true", () => {
+    const provider = kimiCode("kimi-k2.6");
+    const { command } = provider.buildPrintCommand({
+      prompt: "test",
+      dangerouslySkipPermissions: true,
+    });
+    expect(command).toContain("--yolo");
+  });
+
+  it("buildPrintCommand does NOT include --yolo when dangerouslySkipPermissions is false", () => {
+    const provider = kimiCode("kimi-k2.6");
+    const { command } = provider.buildPrintCommand({
+      prompt: "test",
+      dangerouslySkipPermissions: false,
+    });
+    expect(command).not.toContain("--yolo");
+  });
+
+  it("buildInteractiveArgs includes --yolo when dangerouslySkipPermissions is true", () => {
+    const provider = kimiCode("kimi-k2.6");
+    const args = provider.buildInteractiveArgs!({
+      prompt: "test",
+      dangerouslySkipPermissions: true,
+    });
+    expect(args).toContain("--yolo");
+  });
+
+  it("buildInteractiveArgs does NOT include --yolo when dangerouslySkipPermissions is false", () => {
+    const provider = kimiCode("kimi-k2.6");
+    const args = provider.buildInteractiveArgs!({
+      prompt: "test",
+      dangerouslySkipPermissions: false,
+    });
+    expect(args).not.toContain("--yolo");
   });
 });

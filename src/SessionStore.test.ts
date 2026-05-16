@@ -82,9 +82,7 @@ describe("encodeProjectPath", () => {
   });
 
   it("strips multiple trailing backslashes", () => {
-    expect(encodeProjectPath("D:\\projekts\\app\\\\")).toBe(
-      "D-projekts-app",
-    );
+    expect(encodeProjectPath("D:\\projekts\\app\\\\")).toBe("D-projekts-app");
   });
 });
 
@@ -427,5 +425,77 @@ describe("sandboxSessionStore", () => {
       "/tmp/.claude/projects",
     );
     expect(store.cwd).toBe("/sandbox/work");
+  });
+});
+
+// --- Issue 012: Session transfer hardening ---
+
+describe("transferSession malformed JSONL resilience", () => {
+  it("preserves a malformed line in the middle of valid JSONL", async () => {
+    const jsonl = [
+      JSON.stringify({ type: "system", cwd: "/sandbox/worktree" }),
+      "this is not json",
+      JSON.stringify({ type: "message", content: "hello" }),
+    ].join("\n");
+
+    const source = createMemoryStore("/sandbox/worktree", { s1: jsonl });
+    const target = createMemoryStore("/host/repo");
+
+    await transferSession(source, target, "s1");
+
+    const written = target.data.get("s1")!;
+    const lines = written.split("\n");
+    expect(JSON.parse(lines[0]!)).toEqual({
+      type: "system",
+      cwd: "/host/repo",
+    });
+    expect(lines[1]).toBe("this is not json");
+    expect(JSON.parse(lines[2]!)).toEqual({
+      type: "message",
+      content: "hello",
+    });
+  });
+
+  it("completes transfer when all lines are malformed", async () => {
+    const jsonl = ["not json", "also bad"].join("\n");
+
+    const source = createMemoryStore("/sandbox/worktree", { s1: jsonl });
+    const target = createMemoryStore("/host/repo");
+
+    await transferSession(source, target, "s1");
+
+    expect(target.data.get("s1")).toBe(jsonl);
+  });
+
+  it("rewrites valid lines and preserves invalid lines in a mixed JSONL", async () => {
+    const jsonl = [
+      JSON.stringify({ type: "system", cwd: "/sandbox/worktree" }),
+      "{broken",
+      JSON.stringify({
+        type: "tool_call",
+        cwd: "/sandbox/worktree",
+        name: "Read",
+      }),
+      "just plain text",
+    ].join("\n");
+
+    const source = createMemoryStore("/sandbox/worktree", { s1: jsonl });
+    const target = createMemoryStore("/host/repo");
+
+    await transferSession(source, target, "s1");
+
+    const written = target.data.get("s1")!;
+    const lines = written.split("\n");
+    expect(JSON.parse(lines[0]!)).toEqual({
+      type: "system",
+      cwd: "/host/repo",
+    });
+    expect(lines[1]).toBe("{broken");
+    expect(JSON.parse(lines[2]!)).toEqual({
+      type: "tool_call",
+      cwd: "/host/repo",
+      name: "Read",
+    });
+    expect(lines[3]).toBe("just plain text");
   });
 });

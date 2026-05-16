@@ -25,6 +25,7 @@ import {
   pi as piFactory,
   DEFAULT_MODEL,
 } from "./AgentProvider.js";
+import type { AgentProvider } from "./AgentProvider.js";
 import { Sandbox } from "./SandboxFactory.js";
 import type { DockerError, SandboxError } from "./errors.js";
 import { AgentError, AgentIdleTimeoutError } from "./errors.js";
@@ -1594,36 +1595,34 @@ describe("Orchestrator error handling", () => {
     await commitFile(hostDir, "hello.txt", "hello", "initial commit");
 
     const opencodeProvider = opencodeFactory("test-model");
-    const stdoutContent = "Setting up environment...\nLoading model...\nError: API key is invalid\nPlease check your credentials";
+    const stdoutContent =
+      "Setting up environment...\nLoading model...\nError: API key is invalid\nPlease check your credentials";
 
-    const { factoryLayer } = makeTestSandboxFactory(
-      hostDir,
-      (dir) => {
-        const fsLayer = makeLocalSandboxLayer(dir);
-        return Layer.succeed(Sandbox, {
-          exec: (command, options) => {
-            if (command.startsWith("opencode ")) {
-              return Effect.succeed({
-                stdout: stdoutContent,
-                stderr: "",
-                exitCode: 1,
-              });
-            }
-            return Effect.flatMap(Sandbox, (real) =>
-              real.exec(command, options),
-            ).pipe(Effect.provide(fsLayer));
-          },
-          copyIn: (hostPath, sandboxPath) =>
-            Effect.flatMap(Sandbox, (real) =>
-              real.copyIn(hostPath, sandboxPath),
-            ).pipe(Effect.provide(fsLayer)),
-          copyFileOut: (sandboxPath, hostPath) =>
-            Effect.flatMap(Sandbox, (real) =>
-              real.copyFileOut(sandboxPath, hostPath),
-            ).pipe(Effect.provide(fsLayer)),
-        });
-      },
-    );
+    const { factoryLayer } = makeTestSandboxFactory(hostDir, (dir) => {
+      const fsLayer = makeLocalSandboxLayer(dir);
+      return Layer.succeed(Sandbox, {
+        exec: (command, options) => {
+          if (command.startsWith("opencode ")) {
+            return Effect.succeed({
+              stdout: stdoutContent,
+              stderr: "",
+              exitCode: 1,
+            });
+          }
+          return Effect.flatMap(Sandbox, (real) =>
+            real.exec(command, options),
+          ).pipe(Effect.provide(fsLayer));
+        },
+        copyIn: (hostPath, sandboxPath) =>
+          Effect.flatMap(Sandbox, (real) =>
+            real.copyIn(hostPath, sandboxPath),
+          ).pipe(Effect.provide(fsLayer)),
+        copyFileOut: (sandboxPath, hostPath) =>
+          Effect.flatMap(Sandbox, (real) =>
+            real.copyFileOut(sandboxPath, hostPath),
+          ).pipe(Effect.provide(fsLayer)),
+      });
+    });
 
     const exit = await Effect.runPromiseExit(
       orchestrate({
@@ -1657,35 +1656,32 @@ describe("Orchestrator error handling", () => {
       result: "Rate limit exceeded, please retry later",
     });
 
-    const { factoryLayer } = makeTestSandboxFactory(
-      hostDir,
-      (dir) => {
-        const fsLayer = makeLocalSandboxLayer(dir);
-        return Layer.succeed(Sandbox, {
-          exec: (command, options) => {
-            if (command.startsWith("claude ") && options?.onLine) {
-              options.onLine(errorLine);
-              return Effect.succeed({
-                stdout: errorLine,
-                stderr: "",
-                exitCode: 1,
-              });
-            }
-            return Effect.flatMap(Sandbox, (real) =>
-              real.exec(command, options),
-            ).pipe(Effect.provide(fsLayer));
-          },
-          copyIn: (hostPath, sandboxPath) =>
-            Effect.flatMap(Sandbox, (real) =>
-              real.copyIn(hostPath, sandboxPath),
-            ).pipe(Effect.provide(fsLayer)),
-          copyFileOut: (sandboxPath, hostPath) =>
-            Effect.flatMap(Sandbox, (real) =>
-              real.copyFileOut(sandboxPath, hostPath),
-            ).pipe(Effect.provide(fsLayer)),
-        });
-      },
-    );
+    const { factoryLayer } = makeTestSandboxFactory(hostDir, (dir) => {
+      const fsLayer = makeLocalSandboxLayer(dir);
+      return Layer.succeed(Sandbox, {
+        exec: (command, options) => {
+          if (command.startsWith("claude ") && options?.onLine) {
+            options.onLine(errorLine);
+            return Effect.succeed({
+              stdout: errorLine,
+              stderr: "",
+              exitCode: 1,
+            });
+          }
+          return Effect.flatMap(Sandbox, (real) =>
+            real.exec(command, options),
+          ).pipe(Effect.provide(fsLayer));
+        },
+        copyIn: (hostPath, sandboxPath) =>
+          Effect.flatMap(Sandbox, (real) =>
+            real.copyIn(hostPath, sandboxPath),
+          ).pipe(Effect.provide(fsLayer)),
+        copyFileOut: (sandboxPath, hostPath) =>
+          Effect.flatMap(Sandbox, (real) =>
+            real.copyFileOut(sandboxPath, hostPath),
+          ).pipe(Effect.provide(fsLayer)),
+      });
+    });
 
     const exit = await Effect.runPromiseExit(
       orchestrate({
@@ -1702,7 +1698,9 @@ describe("Orchestrator error handling", () => {
       expect(err).toBeInstanceOf(AgentError);
       if (err instanceof AgentError) {
         expect(err.message).toContain("claude-code exited with code 1:");
-        expect(err.message).toContain("Rate limit exceeded, please retry later");
+        expect(err.message).toContain(
+          "Rate limit exceeded, please retry later",
+        );
       }
     }
   });
@@ -1715,34 +1713,31 @@ describe("Orchestrator error handling", () => {
 
     const opencodeProvider = opencodeFactory("test-model");
 
-    const { factoryLayer } = makeTestSandboxFactory(
-      hostDir,
-      (dir) => {
-        const fsLayer = makeLocalSandboxLayer(dir);
-        return Layer.succeed(Sandbox, {
-          exec: (command, options) => {
-            if (command.startsWith("opencode ")) {
-              return Effect.succeed({
-                stdout: "some stdout output",
-                stderr: "fatal error from stderr",
-                exitCode: 1,
-              });
-            }
-            return Effect.flatMap(Sandbox, (real) =>
-              real.exec(command, options),
-            ).pipe(Effect.provide(fsLayer));
-          },
-          copyIn: (hostPath, sandboxPath) =>
-            Effect.flatMap(Sandbox, (real) =>
-              real.copyIn(hostPath, sandboxPath),
-            ).pipe(Effect.provide(fsLayer)),
-          copyFileOut: (sandboxPath, hostPath) =>
-            Effect.flatMap(Sandbox, (real) =>
-              real.copyFileOut(sandboxPath, hostPath),
-            ).pipe(Effect.provide(fsLayer)),
-        });
-      },
-    );
+    const { factoryLayer } = makeTestSandboxFactory(hostDir, (dir) => {
+      const fsLayer = makeLocalSandboxLayer(dir);
+      return Layer.succeed(Sandbox, {
+        exec: (command, options) => {
+          if (command.startsWith("opencode ")) {
+            return Effect.succeed({
+              stdout: "some stdout output",
+              stderr: "fatal error from stderr",
+              exitCode: 1,
+            });
+          }
+          return Effect.flatMap(Sandbox, (real) =>
+            real.exec(command, options),
+          ).pipe(Effect.provide(fsLayer));
+        },
+        copyIn: (hostPath, sandboxPath) =>
+          Effect.flatMap(Sandbox, (real) =>
+            real.copyIn(hostPath, sandboxPath),
+          ).pipe(Effect.provide(fsLayer)),
+        copyFileOut: (sandboxPath, hostPath) =>
+          Effect.flatMap(Sandbox, (real) =>
+            real.copyFileOut(sandboxPath, hostPath),
+          ).pipe(Effect.provide(fsLayer)),
+      });
+    });
 
     const exit = await Effect.runPromiseExit(
       orchestrate({
@@ -3807,5 +3802,132 @@ describe("Orchestrator signal (AbortSignal)", () => {
 
     expect(result.iterations.length).toBe(1);
     expect(result.completionSignal).toBe("<promise>COMPLETE</promise>");
+  });
+});
+
+describe("Orchestrator thinking event routing", () => {
+  it("routes thinking events through onThinking, not onText", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "orch-thinking-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const ref = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
+    const displayLayer = SilentDisplay.layer(ref);
+
+    const events: AgentStreamEvent[] = [];
+    const emitterLayer = callbackAgentStreamEmitterLayer((e) => {
+      events.push(e);
+    });
+
+    // Custom provider that parses thinking events in addition to claude events
+    const thinkingProvider: AgentProvider = {
+      ...claudeCode("test-model"),
+      parseStreamLine(line: string) {
+        try {
+          const obj = JSON.parse(line);
+          if (obj.type === "thinking" && typeof obj.text === "string") {
+            return [{ type: "thinking", text: obj.text }];
+          }
+        } catch {
+          // fall through
+        }
+        return claudeCode("test-model").parseStreamLine(line);
+      },
+    };
+
+    const mockLayer = makeTestSandboxFactory(hostDir, (dir) => {
+      const fsLayer = makeLocalSandboxLayer(dir);
+      return Layer.succeed(Sandbox, {
+        exec: (command, options) => {
+          if (command.startsWith("claude ") && options?.onLine) {
+            const onLine = options.onLine;
+            const lines = [
+              JSON.stringify({
+                type: "assistant",
+                message: {
+                  content: [{ type: "text", text: "Final answer" }],
+                },
+              }),
+              JSON.stringify({
+                type: "thinking",
+                text: "Let me think...",
+              }),
+              JSON.stringify({
+                type: "result",
+                result: "<promise>COMPLETE</promise>",
+              }),
+            ];
+            for (const line of lines) onLine(line);
+            return Effect.succeed({
+              stdout: lines.join("\n"),
+              stderr: "",
+              exitCode: 0,
+            });
+          }
+          return Effect.flatMap(Sandbox, (real) =>
+            real.exec(command, options),
+          ).pipe(Effect.provide(fsLayer));
+        },
+        copyIn: (hostPath, sandboxPath) =>
+          Effect.flatMap(Sandbox, (real) =>
+            real.copyIn(hostPath, sandboxPath),
+          ).pipe(Effect.provide(fsLayer)),
+        copyFileOut: (sandboxPath, hostPath) =>
+          Effect.flatMap(Sandbox, (real) =>
+            real.copyFileOut(sandboxPath, hostPath),
+          ).pipe(Effect.provide(fsLayer)),
+      });
+    });
+
+    await Effect.runPromise(
+      orchestrate({
+        provider: thinkingProvider,
+        hostRepoDir: hostDir,
+        iterations: 1,
+        prompt: "do some work",
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            mockLayer.factoryLayer,
+            displayLayer,
+            defaultSessionPathsLayer,
+            emitterLayer,
+          ),
+        ),
+      ),
+    );
+
+    const entries = await Effect.runPromise(Ref.get(ref));
+
+    // Thinking should NOT appear as text entries
+    const textEntries = entries.filter((e) => e._tag === "text");
+    expect(
+      textEntries.some((e) =>
+        (e as Extract<DisplayEntry, { _tag: "text" }>).message.includes(
+          "Let me think...",
+        ),
+      ),
+    ).toBe(false);
+
+    // Thinking should appear as thinking entries
+    const thinkingEntries = entries.filter((e) => e._tag === "thinking");
+    expect(thinkingEntries.length).toBeGreaterThan(0);
+    expect(
+      thinkingEntries.some((e) =>
+        (e as Extract<DisplayEntry, { _tag: "thinking" }>).message.includes(
+          "Let me think...",
+        ),
+      ),
+    ).toBe(true);
+
+    // Stream emitter should have received a thinking event
+    const thinkingEvents = events.filter((e) => e.type === "thinking");
+    expect(thinkingEvents.length).toBeGreaterThan(0);
+    expect(thinkingEvents[0]).toMatchObject({
+      type: "thinking",
+      message: "Let me think...",
+      iteration: 1,
+    });
+    expect(thinkingEvents[0]!.timestamp).toBeInstanceOf(Date);
   });
 });

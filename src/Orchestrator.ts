@@ -1,6 +1,7 @@
-import { Deferred, Effect } from "effect";
+import { Deferred, Effect, Layer } from "effect";
 import { AgentStreamEmitter } from "./AgentStreamEmitter.js";
-import { Display } from "./Display.js";
+import { Display, type DisplayService } from "./Display.js";
+import { logUnrecognizedLine } from "./StreamLineTelemetry.js";
 import { preprocessPrompt } from "./PromptPreprocessor.js";
 import {
   AgentError,
@@ -25,8 +26,11 @@ const invokeAgent = (
   provider: AgentProvider,
   idleTimeoutMs: number,
   onText: (text: string) => void,
+  onThinking: (text: string) => void,
   onToolCall: (name: string, formattedArgs: string) => void,
+  onDebug: (message: string) => void,
   onIdleWarning: (minutes: number) => void,
+  display: DisplayService,
   idleWarningIntervalMs: number = IDLE_WARNING_INTERVAL_MS,
   resumeSession?: string,
   signal?: AbortSignal,
@@ -97,11 +101,19 @@ const invokeAgent = (
       const execResult = yield* sandbox.exec(printCmd.command, {
         onLine: (line) => {
           resetIdleTimer();
-          for (const parsed of provider.parseStreamLine(line)) {
+          const parsedEvents = provider.parseStreamLine(line);
+          if (parsedEvents.length === 0 && line.trim().length > 0) {
+            Effect.runPromise(
+              logUnrecognizedLine(provider.name, line).pipe(
+                Effect.provide(Layer.succeed(Display, display)),
+              ),
+            ).catch(() => {});
+          }
+          for (const parsed of parsedEvents) {
             if (parsed.type === "text") {
               onText(parsed.text);
             } else if (parsed.type === "thinking") {
-              onText(parsed.text);
+              onThinking(parsed.text);
             } else if (parsed.type === "result") {
               resultText = parsed.result;
             } else if (parsed.type === "tool_call") {
@@ -327,6 +339,18 @@ export const orchestrate = (
                 const onText = (text: string) => {
                   textBuffer.write(text);
                 };
+                const onThinking = (text: string) => {
+                  textBuffer.flush();
+                  Effect.runPromise(display.thinking(text));
+                  Effect.runPromise(
+                    streamEmitter.emit({
+                      type: "thinking",
+                      message: text,
+                      iteration: i,
+                      timestamp: new Date(),
+                    }),
+                  );
+                };
                 const onToolCall = (name: string, formattedArgs: string) => {
                   textBuffer.flush();
                   Effect.runPromise(display.toolCall(name, formattedArgs));
@@ -339,6 +363,9 @@ export const orchestrate = (
                       timestamp: new Date(),
                     }),
                   );
+                };
+                const onDebug = (message: string) => {
+                  Effect.runPromise(display.debug(message));
                 };
                 const onIdleWarning = (minutes: number) => {
                   const msg =
@@ -354,8 +381,11 @@ export const orchestrate = (
                   provider,
                   idleTimeoutMs,
                   onText,
+                  onThinking,
                   onToolCall,
+                  onDebug,
                   onIdleWarning,
+                  display,
                   options._idleWarningIntervalMs,
                   iterationResumeSession,
                   options.signal,

@@ -4,11 +4,13 @@ import { tmpdir } from "node:os";
 import { NodeFileSystem } from "@effect/platform-node";
 import { Effect, Layer, Ref } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as clack from "@clack/prompts";
 import {
   Display,
   type DisplayEntry,
   FileDisplay,
   SilentDisplay,
+  ClackDisplay,
   terminalStyle,
 } from "./Display.js";
 
@@ -564,5 +566,158 @@ describe("terminalStyle", () => {
     expect(styled).toContain("\u001b[1mTokens\u001b[22m");
     expect(styled).toContain("\u001b[2m1,234 in / 567 out\u001b[22m");
     expect(styled).toContain(": ");
+  });
+});
+
+describe("SilentDisplay - debug", () => {
+  it("stores debug entries for test assertions", async () => {
+    const ref = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
+    const layer = SilentDisplay.layer(ref);
+
+    const entries = await Effect.runPromise(
+      Effect.gen(function* () {
+        const d = yield* Display;
+        yield* d.debug("Unrecognized line: foo");
+        return yield* Ref.get(ref);
+      }).pipe(Effect.provide(layer)),
+    );
+
+    expect(entries).toEqual([
+      { _tag: "debug", message: "Unrecognized line: foo" },
+    ]);
+  });
+});
+
+describe("FileDisplay - debug", () => {
+  const setup = () => {
+    const dir = mkdtempSync(join(tmpdir(), "sandcastle-display-"));
+    const logPath = join(dir, "test.log");
+    const layer = Layer.provide(
+      FileDisplay.layer(logPath),
+      NodeFileSystem.layer,
+    );
+    return { logPath, layer };
+  };
+
+  const readLog = (logPath: string) => readFileSync(logPath, "utf-8");
+
+  it("writes debug messages with [debug] prefix to file", async () => {
+    const { logPath, layer } = setup();
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const d = yield* Display;
+        yield* d.debug("Unrecognized line: foo");
+      }).pipe(Effect.provide(layer)),
+    );
+
+    const log = readLog(logPath);
+    expect(log).toContain("[debug] Unrecognized line: foo");
+  });
+});
+
+describe("SilentDisplay - thinking", () => {
+  const setup = () => {
+    const ref = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
+    const layer = SilentDisplay.layer(ref);
+    return { ref, layer };
+  };
+
+  it("stores thinking entries for test assertions", async () => {
+    const { ref, layer } = setup();
+
+    const entries = await Effect.runPromise(
+      Effect.gen(function* () {
+        const d = yield* Display;
+        yield* d.thinking("Let me think about this...");
+        return yield* Ref.get(ref);
+      }).pipe(Effect.provide(layer)),
+    );
+
+    expect(entries).toEqual([
+      { _tag: "thinking", message: "Let me think about this..." },
+    ]);
+  });
+
+  it("stores multiple thinking entries in order", async () => {
+    const { ref, layer } = setup();
+
+    const entries = await Effect.runPromise(
+      Effect.gen(function* () {
+        const d = yield* Display;
+        yield* d.thinking("First thought");
+        yield* d.thinking("Second thought");
+        return yield* Ref.get(ref);
+      }).pipe(Effect.provide(layer)),
+    );
+
+    expect(entries).toEqual([
+      { _tag: "thinking", message: "First thought" },
+      { _tag: "thinking", message: "Second thought" },
+    ]);
+  });
+});
+
+describe("FileDisplay - thinking", () => {
+  const setup = () => {
+    const dir = mkdtempSync(join(tmpdir(), "sandcastle-display-"));
+    const logPath = join(dir, "test.log");
+    const layer = Layer.provide(
+      FileDisplay.layer(logPath),
+      NodeFileSystem.layer,
+    );
+    return { logPath, layer };
+  };
+
+  const readLog = (logPath: string) => readFileSync(logPath, "utf-8");
+
+  it("writes thinking messages with [thinking] prefix", async () => {
+    const { logPath, layer } = setup();
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const d = yield* Display;
+        yield* d.thinking("Let me think about this...");
+      }).pipe(Effect.provide(layer)),
+    );
+
+    const log = readLog(logPath);
+    expect(log).toContain("[thinking] Let me think about this...");
+  });
+
+  it("writes multiple thinking messages in order", async () => {
+    const { logPath, layer } = setup();
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const d = yield* Display;
+        yield* d.thinking("First thought");
+        yield* d.thinking("Second thought");
+      }).pipe(Effect.provide(layer)),
+    );
+
+    const log = readLog(logPath);
+    const lines = log.trim().split("\n");
+    expect(lines).toContain("[thinking] First thought");
+    expect(lines).toContain("[thinking] Second thought");
+  });
+});
+
+describe("ClackDisplay - thinking", () => {
+  it("renders thinking messages with dim style", async () => {
+    const spy = vi.spyOn(clack.log, "message").mockImplementation(() => {});
+    const layer = ClackDisplay.layer;
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const d = yield* Display;
+        yield* d.thinking("Let me think about this...");
+      }).pipe(Effect.provide(layer)),
+    );
+
+    expect(spy).toHaveBeenCalledWith(
+      expect.stringContaining("Let me think about this..."),
+    );
+    spy.mockRestore();
   });
 });

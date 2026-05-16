@@ -15,6 +15,12 @@ export type AgentStreamEvent =
       readonly timestamp: Date;
     }
   | {
+      readonly type: "thinking";
+      readonly message: string;
+      readonly iteration: number;
+      readonly timestamp: Date;
+    }
+  | {
       readonly type: "toolCall";
       readonly name: string;
       readonly formattedArgs: string;

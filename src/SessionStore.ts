@@ -159,11 +159,17 @@ export const transferSession = async (
     .split("\n")
     .map((line) => {
       if (line === "") return line;
-      const entry = JSON.parse(line) as Record<string, unknown>;
-      if (typeof entry.cwd === "string" && entry.cwd === from.cwd) {
-        entry.cwd = to.cwd;
+      try {
+        const entry = JSON.parse(line) as Record<string, unknown>;
+        if (typeof entry.cwd === "string" && entry.cwd === from.cwd) {
+          entry.cwd = to.cwd;
+        }
+        return JSON.stringify(entry);
+      } catch {
+        // Preserve malformed lines unchanged so the transfer doesn't crash
+        // and no data is lost.
+        return line;
       }
-      return JSON.stringify(entry);
     })
     .join("\n");
 

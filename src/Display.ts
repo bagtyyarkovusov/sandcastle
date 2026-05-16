@@ -25,11 +25,13 @@ export type DisplayEntry =
       readonly messages: ReadonlyArray<string>;
     }
   | { readonly _tag: "text"; readonly message: string }
+  | { readonly _tag: "thinking"; readonly message: string }
   | {
       readonly _tag: "toolCall";
       readonly name: string;
       readonly formattedArgs: string;
-    };
+    }
+  | { readonly _tag: "debug"; readonly message: string };
 
 export interface DisplayService {
   readonly intro: (title: string) => Effect.Effect<void>;
@@ -53,10 +55,14 @@ export interface DisplayService {
 
   readonly text: (message: string) => Effect.Effect<void>;
 
+  readonly thinking: (message: string) => Effect.Effect<void>;
+
   readonly toolCall: (
     name: string,
     formattedArgs: string,
   ) => Effect.Effect<void>;
+
+  readonly debug: (message: string) => Effect.Effect<void>;
 }
 
 export class Display extends Context.Tag("Display")<
@@ -119,10 +125,22 @@ export const SilentDisplay = {
           { _tag: "text" as const, message },
         ]),
 
+      thinking: (message) =>
+        Ref.update(ref, (entries) => [
+          ...entries,
+          { _tag: "thinking" as const, message },
+        ]),
+
       toolCall: (name, formattedArgs) =>
         Ref.update(ref, (entries) => [
           ...entries,
           { _tag: "toolCall" as const, name, formattedArgs },
+        ]),
+
+      debug: (message) =>
+        Ref.update(ref, (entries) => [
+          ...entries,
+          { _tag: "debug" as const, message },
         ]),
     }),
 };
@@ -189,8 +207,12 @@ export const FileDisplay = {
 
           text: (message) => appendToLog(message),
 
+          thinking: (message) => appendToLog("[thinking] " + message),
+
           toolCall: (name, formattedArgs) =>
             appendToLog(`${name}(${formattedArgs})`),
+
+          debug: (message) => appendToLog("[debug] " + message),
         };
       }),
     ),
@@ -263,9 +285,14 @@ export const ClackDisplay = {
 
     text: (message) => Effect.sync(() => clack.log.message(message)),
 
+    thinking: (message) =>
+      Effect.sync(() => clack.log.message(styleText("dim", message))),
+
     toolCall: (name, formattedArgs) =>
       Effect.sync(() =>
         clack.log.step(terminalStyle.toolCall(`${name}(${formattedArgs})`)),
       ),
+
+    debug: () => Effect.void,
   }),
 };

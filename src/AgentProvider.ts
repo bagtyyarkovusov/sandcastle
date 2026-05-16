@@ -492,10 +492,18 @@ const KIMI_TOOL_ARGS: Record<string, string> = {
   ReadFile: "path",
 };
 
+const SESSION_ID_PATTERNS = [
+  /^To resume this session: kimi -r (\S+)/,
+  /^Resume with: kimi -r (\S+)/,
+  /kimi -r (\S+)/, // loose fallback
+];
+
 const parseKimiStreamLine = (line: string): ParsedStreamEvent[] => {
   if (!line.startsWith("{")) {
-    const m = line.match(/^To resume this session: kimi -r (\S+)/);
-    if (m) return [{ type: "session_id", sessionId: m[1]! }];
+    for (const pattern of SESSION_ID_PATTERNS) {
+      const m = line.match(pattern);
+      if (m) return [{ type: "session_id", sessionId: m[1]! }];
+    }
     return [];
   }
 
@@ -504,6 +512,17 @@ const parseKimiStreamLine = (line: string): ParsedStreamEvent[] => {
     obj = JSON.parse(line);
   } catch {
     return [];
+  }
+
+  // Error / agent_error events
+  if (obj.type === "error" || obj.type === "agent_error") {
+    const msg = extractErrorMessage(obj);
+    return msg ? [{ type: "result", result: msg }] : [];
+  }
+
+  // Result events
+  if (obj.type === "result" && typeof obj.result === "string") {
+    return [{ type: "result", result: obj.result }];
   }
 
   // Wire protocol: ContentPart events streamed in real-time
@@ -708,27 +727,94 @@ export const kimiCode = (
 
   buildPrintCommand({
     prompt,
+    dangerouslySkipPermissions,
     resumeSession,
   }: AgentCommandOptions): PrintCommand {
     const thinking = options?.thinking !== false; // default on
     const thinkingFlag = thinking ? " --thinking" : " --no-thinking";
+    const yoloFlag = dangerouslySkipPermissions ? " --yolo" : "";
     const resumeFlag = resumeSession ? ` -r ${shellEscape(resumeSession)}` : "";
     return {
-      command: `kimi --print --input-format stream-json --output-format stream-json${thinkingFlag} --model ${shellEscape(model)}${resumeFlag}`,
+      command: `kimi --print --input-format stream-json --output-format stream-json${thinkingFlag}${yoloFlag} --model ${shellEscape(model)}${resumeFlag}`,
       stdin: JSON.stringify({ role: "user", content: prompt }) + "\n",
     };
   },
 
-  buildInteractiveArgs({ prompt }: AgentCommandOptions): string[] {
+  buildInteractiveArgs({
+    prompt,
+    dangerouslySkipPermissions,
+  }: AgentCommandOptions): string[] {
     const thinking = options?.thinking !== false;
     const args = thinking
       ? ["kimi", "--thinking", "--model", model]
       : ["kimi", "--no-thinking", "--model", model];
+    if (dangerouslySkipPermissions) args.push("--yolo");
     if (prompt) args.push(prompt);
     return args;
   },
 
   parseStreamLine(line: string): ParsedStreamEvent[] {
     return parseKimiStreamLine(line);
+  },
+
+  parseSessionUsage(content: string): IterationUsage | undefined {
+    const lines = content.split("\n");
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i]!;
+      if (!line.startsWith("{")) continue;
+      try {
+        const obj = JSON.parse(line);
+        // Kimi session lines may use role: "assistant" (legacy print mode)
+        // or type: "assistant" (wire protocol).
+        const isAssistant =
+          obj.role === "assistant" || obj.type === "assistant";
+        if (!isAssistant) continue;
+
+        // Best-effort usage extraction — exact Kimi session field names are
+        // not yet documented, so we probe common OpenAI-style shapes.
+        const usage = obj.usage ?? obj.message?.usage ?? obj.tokens;
+        if (typeof usage !== "object" || usage === null) continue;
+
+        const inputTokens =
+          typeof usage.input_tokens === "number"
+            ? usage.input_tokens
+            : typeof usage.inputTokens === "number"
+              ? usage.inputTokens
+              : typeof usage.input === "number"
+                ? usage.input
+                : undefined;
+
+        const outputTokens =
+          typeof usage.output_tokens === "number"
+            ? usage.output_tokens
+            : typeof usage.outputTokens === "number"
+              ? usage.outputTokens
+              : typeof usage.output === "number"
+                ? usage.output
+                : undefined;
+
+        if (inputTokens !== undefined && outputTokens !== undefined) {
+          return {
+            inputTokens,
+            cacheCreationInputTokens:
+              typeof usage.cache_creation_input_tokens === "number"
+                ? usage.cache_creation_input_tokens
+                : typeof usage.cacheCreationInputTokens === "number"
+                  ? usage.cacheCreationInputTokens
+                  : 0,
+            cacheReadInputTokens:
+              typeof usage.cache_read_input_tokens === "number"
+                ? usage.cache_read_input_tokens
+                : typeof usage.cacheReadInputTokens === "number"
+                  ? usage.cacheReadInputTokens
+                  : 0,
+            outputTokens,
+          };
+        }
+      } catch {
+        // Skip malformed lines
+      }
+    }
+    return undefined;
   },
 });

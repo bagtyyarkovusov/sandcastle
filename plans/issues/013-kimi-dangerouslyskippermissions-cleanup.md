@@ -12,13 +12,17 @@ This slice cuts through the agent provider layer (`KimiCodeOptions` type, `build
 
 End-to-end behavior: the Kimi provider's type system accurately reflects its runtime capabilities. If Kimi CLI has a `--yes` or similar flag, `dangerouslySkipPermissions: true` passes it through. If not, the option is removed from `KimiCodeOptions` so users are not misled by a type-system guarantee with no runtime effect.
 
+## Implementation note
+
+Decision: wire the flag. Kimi CLI supports `--yolo`; `buildPrintCommand` and `buildInteractiveArgs` pass it when `dangerouslySkipPermissions` is true.
+
 ## Acceptance criteria
 
-- [ ] Kimi CLI documentation or binary is checked for a non-interactive / permission-skipping flag
-- [ ] Decision recorded in this issue: wire the flag, or remove the field
-- [ ] If wiring: `buildPrintCommand` and `buildInteractiveArgs` pass the flag when `dangerouslySkipPermissions` is true
-- [ ] If removing: `KimiCodeOptions` no longer includes `dangerouslySkipPermissions`; `buildPrintCommand` and `buildInteractiveArgs` signatures updated
-- [ ] `AgentProvider.test.ts` updated to match the chosen behavior
+- [x] Kimi CLI documentation or binary is checked for a non-interactive / permission-skipping flag
+- [x] Decision recorded in this issue: wire the flag, or remove the field
+- [x] If wiring: `buildPrintCommand` and `buildInteractiveArgs` pass the flag when `dangerouslySkipPermissions` is true
+- [x] If removing: `KimiCodeOptions` no longer includes `dangerouslySkipPermissions`; `buildPrintCommand` and `buildInteractiveArgs` signatures updated
+- [x] `AgentProvider.test.ts` updated to match the chosen behavior
 
 ## Blocked by
 

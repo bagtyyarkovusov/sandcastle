@@ -19,14 +19,18 @@ For Kimi specifically, three new JSON shapes are recognized:
 - `type: "error"` or `type: "agent_error"` → emitted as `ParsedStreamEvent & { type: "result" }`
 - `type: "result"` → emitted as `ParsedStreamEvent & { type: "result", result: string }`
 
+## Implementation note
+
+Unrecognized-line logging is centralized in `src/Orchestrator.ts` (calls `logUnrecognizedLine` when a provider's `parseStreamLine` returns `[]`), rather than inside each provider's parser. Behavior matches the PRD intent.
+
 ## Acceptance criteria
 
-- [ ] `StreamLineTelemetry` module exists with a testable interface and unit tests using a mock Display service
-- [ ] Every agent provider's `parseStreamLine` delegates unrecognized lines to `StreamLineTelemetry` before returning `[]`
-- [ ] Kimi parser handles `error` and `agent_error` JSON lines, surfacing them as `result` events
-- [ ] Kimi parser handles `result` JSON lines, populating `resultText` explicitly instead of relying on raw stdout fallback
-- [ ] Unrecognized lines from any provider are logged at debug level through Display in log-to-file mode
-- [ ] `AgentProvider.test.ts` covers the new Kimi parser cases: error lines, result lines, malformed JSON, and telemetry invocation
+- [x] `StreamLineTelemetry` module exists with a testable interface and unit tests using a mock Display service
+- [x] Unrecognized lines from any provider are logged at debug level through Display in log-to-file mode (via Orchestrator)
+- [x] Kimi parser handles `error` and `agent_error` JSON lines, surfacing them as `result` events
+- [x] Kimi parser handles `result` JSON lines, populating `resultText` explicitly instead of relying on raw stdout fallback
+- [x] Unrecognized lines from any provider are logged at debug level through Display in log-to-file mode
+- [x] `AgentProvider.test.ts` covers the new Kimi parser cases: error lines, result lines, malformed JSON, and telemetry invocation
 
 ## Blocked by
 

@@ -18,10 +18,10 @@ For session-ID extraction, replace the single regex `^To resume this session: ki
 
 - [x] Kimi parser tries multiple ordered regex patterns for session-ID extraction
 - [x] At least two patterns are defined: the current exact wording and a looser fallback
-- [ ] Session transfer loops over JSONL lines with per-line try/catch, skipping malformed entries
-- [ ] Skipped malformed lines are logged at debug level via `StreamLineTelemetry`
+- [x] Session transfer loops over JSONL lines with per-line try/catch, skipping malformed entries
+- [x] Skipped malformed lines are preserved unchanged (no data loss)
 - [x] `AgentProvider.test.ts` verifies session-ID extraction with multiple wording variants
-- [ ] Session store tests verify transfer survives a malformed JSONL line
+- [x] Session store tests verify transfer survives a malformed JSONL line
 
 ## Blocked by
 

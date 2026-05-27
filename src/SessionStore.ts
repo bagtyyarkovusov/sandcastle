@@ -136,6 +136,60 @@ export const sandboxSessionStore = (
 };
 
 // ---------------------------------------------------------------------------
+// JSONL line mapping
+// ---------------------------------------------------------------------------
+
+/**
+ * Map JSONL lines, preserving malformed lines unchanged.
+ * Optionally transform each successfully parsed entry.
+ */
+export const mapJsonlLines = (
+  content: string,
+  transformEntry?: (
+    entry: Record<string, unknown>,
+    line: string,
+  ) => Record<string, unknown>,
+): string => {
+  if (content === "") return "";
+
+  return content
+    .split("\n")
+    .map((line) => {
+      if (line === "") return line;
+      try {
+        const entry = JSON.parse(line) as Record<string, unknown>;
+        const transformed = transformEntry
+          ? transformEntry(entry, line)
+          : entry;
+        return JSON.stringify(transformed);
+      } catch {
+        // Preserve malformed lines unchanged so the transfer doesn't crash
+        // and no data is lost.
+        return line;
+      }
+    })
+    .join("\n");
+};
+
+// ---------------------------------------------------------------------------
+// Session transfer helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Copy a session between stores, preserving malformed JSONL lines unchanged.
+ * Does not rewrite fields — use for providers (e.g. Kimi) whose sessions
+ * do not embed cwd.
+ */
+export const copySessionPreservingMalformedLines = async (
+  from: SessionStore,
+  to: SessionStore,
+  id: string,
+): Promise<void> => {
+  const content = await from.readSession(id);
+  await to.writeSession(id, mapJsonlLines(content));
+};
+
+// ---------------------------------------------------------------------------
 // transferSession
 // ---------------------------------------------------------------------------
 
@@ -155,23 +209,12 @@ export const transferSession = async (
     return;
   }
 
-  const rewritten = content
-    .split("\n")
-    .map((line) => {
-      if (line === "") return line;
-      try {
-        const entry = JSON.parse(line) as Record<string, unknown>;
-        if (typeof entry.cwd === "string" && entry.cwd === from.cwd) {
-          entry.cwd = to.cwd;
-        }
-        return JSON.stringify(entry);
-      } catch {
-        // Preserve malformed lines unchanged so the transfer doesn't crash
-        // and no data is lost.
-        return line;
-      }
-    })
-    .join("\n");
+  const rewritten = mapJsonlLines(content, (entry) => {
+    if (typeof entry.cwd === "string" && entry.cwd === from.cwd) {
+      entry.cwd = to.cwd;
+    }
+    return entry;
+  });
 
   await to.writeSession(id, rewritten);
 };

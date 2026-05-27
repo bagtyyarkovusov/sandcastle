@@ -8,6 +8,7 @@ export type ParsedStreamEvent =
 import type { BindMountSandboxHandle } from "./SandboxProvider.js";
 import type { SessionStore } from "./SessionStore.js";
 import {
+  copySessionPreservingMalformedLines,
   hostSessionStore,
   sandboxSessionStore,
   transferSession,
@@ -715,14 +716,7 @@ export const kimiCode = (
         },
       };
     },
-    transfer: async (
-      from: SessionStore,
-      to: SessionStore,
-      id: string,
-    ): Promise<void> => {
-      const content = await from.readSession(id);
-      await to.writeSession(id, content);
-    },
+    transfer: copySessionPreservingMalformedLines,
   },
 
   buildPrintCommand({

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   type SessionStore,
+  copySessionPreservingMalformedLines,
   encodeProjectPath,
   hostSessionStore,
   sandboxSessionStore,
@@ -429,6 +430,34 @@ describe("sandboxSessionStore", () => {
 });
 
 // --- Issue 012: Session transfer hardening ---
+
+describe("copySessionPreservingMalformedLines", () => {
+  it("preserves a malformed line in the middle of valid JSONL without cwd rewrite", async () => {
+    const jsonl = [
+      JSON.stringify({ type: "message", content: "hello" }),
+      "this is not json",
+      JSON.stringify({ type: "message", content: "world" }),
+    ].join("\n");
+
+    const source = createMemoryStore("/sandbox/worktree", { s1: jsonl });
+    const target = createMemoryStore("/host/repo");
+
+    await copySessionPreservingMalformedLines(source, target, "s1");
+
+    expect(target.data.get("s1")).toBe(jsonl);
+  });
+
+  it("completes transfer when all lines are malformed", async () => {
+    const jsonl = ["not json", "also bad"].join("\n");
+
+    const source = createMemoryStore("/sandbox/worktree", { s1: jsonl });
+    const target = createMemoryStore("/host/repo");
+
+    await copySessionPreservingMalformedLines(source, target, "s1");
+
+    expect(target.data.get("s1")).toBe(jsonl);
+  });
+});
 
 describe("transferSession malformed JSONL resilience", () => {
   it("preserves a malformed line in the middle of valid JSONL", async () => {

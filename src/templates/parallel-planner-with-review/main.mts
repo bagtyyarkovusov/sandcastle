@@ -96,7 +96,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     // not write code.
     maxIterations: 1,
     // Kimi for planning: dependency analysis with thinking disabled for speed.
-    agent: sandcastle.claudeCode("claude-opus-4-6", { thinking: false }),
+    agent: sandcastle.claudeCode("claude-opus-4-6"),
     promptFile: "./.sandcastle/plan-prompt.md",
   });
 

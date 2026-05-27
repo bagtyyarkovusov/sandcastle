@@ -21,8 +21,17 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
 ARG AGENT_UID=1000
 ARG AGENT_GID=1000
 
-# Rename the base image's "node" user to "agent" and align UID/GID.
-RUN groupmod -g $AGENT_GID node && usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
+# Resolve GID conflict — on macOS the host GID (e.g. 20/staff) may already
+# exist in the Debian base image (e.g. 20/dialout). Force-delete the
+# conflicting group first so groupmod can reassign the GID to 'node'.
+RUN if getent group $AGENT_GID >/dev/null; then \
+      CONFLICT_GROUP=$(getent group $AGENT_GID | cut -d: -f1); \
+      if [ "$CONFLICT_GROUP" != "node" ]; then \
+        groupdel -f "$CONFLICT_GROUP" 2>/dev/null || true; \
+      fi; \
+    fi && \
+    groupmod -g $AGENT_GID node && \
+    usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
 USER ${AGENT_UID}:${AGENT_GID}
 
 # Install Claude Code CLI

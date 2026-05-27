@@ -166,4 +166,60 @@ describe("sandcastle CLI", () => {
       expect(output).toContain("claude-code");
     }
   });
+
+  it("init --help shows --flavor flag", async () => {
+    const { stdout } = await runCli("init --help", process.cwd());
+    expect(stdout).toContain("--flavor");
+  });
+
+  it("init --flavor node is accepted (does not error early)", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+
+    try {
+      await runCli("init --agent nonexistent --flavor node", hostDir);
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const { stdout, stderr } = err as { stdout: string; stderr: string };
+      const output = stdout + stderr;
+      // Should fail on agent, NOT on flavor — proving flavor validation passed
+      expect(output).toContain("nonexistent");
+      expect(output).not.toContain("Unknown flavor");
+    }
+  });
+
+  it("init --flavor unknown produces error listing available flavors", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+
+    try {
+      await runCli("init --agent claude-code --flavor unknown", hostDir);
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const { stdout, stderr } = err as { stdout: string; stderr: string };
+      const output = stdout + stderr;
+      expect(output).toContain("unknown");
+      expect(output).toContain("node");
+      expect(output).toContain("python");
+      expect(output).toContain("jvm");
+      expect(output).toContain("go");
+      expect(output).toContain("rust");
+    }
+  });
+
+  it("init --flavor python is accepted (does not error early)", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+
+    try {
+      await runCli("init --agent nonexistent --flavor python", hostDir);
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const { stdout, stderr } = err as { stdout: string; stderr: string };
+      const output = stdout + stderr;
+      // Should fail on agent, NOT on flavor — proving flavor validation passed
+      expect(output).toContain("nonexistent");
+      expect(output).not.toContain("Unknown flavor");
+    }
+  });
 });

@@ -1,5 +1,6 @@
 {
   "name": "context7-enhanced",
   "description": "Documentation-aware parallel planner — uses Context7 MCP for live library docs during implementation and review",
-  "compatibleAgents": ["kimi-code"]
+  "compatibleAgents": ["kimi-code"],
+  "environment": "node"
 }

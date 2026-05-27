@@ -23,6 +23,8 @@ import {
   listSandboxProviders,
   getSandboxProvider,
   getNextStepsLines,
+  listFlavors,
+  getFlavor,
 } from "./InitService.js";
 import { defaultImageName } from "./sandboxes/docker.js";
 import type {
@@ -101,6 +103,11 @@ const initModelOption = Options.text("model").pipe(
   Options.optional,
 );
 
+const flavorOption = Options.text("flavor").pipe(
+  Options.withDescription("Environment flavor (e.g. node)"),
+  Options.optional,
+);
+
 const initCommand = Command.make(
   "init",
   {
@@ -108,12 +115,14 @@ const initCommand = Command.make(
     template: templateOption,
     agent: agentOption,
     model: initModelOption,
+    flavor: flavorOption,
   },
   ({
     imageName: imageNameFlag,
     template,
     agent: agentFlag,
     model: modelFlag,
+    flavor: flavorFlag,
   }) =>
     Effect.gen(function* () {
       const d = yield* Display;
@@ -129,6 +138,19 @@ const initCommand = Command.make(
           yield* Effect.fail(
             new InitError({
               message: `Unknown template "${template.value}". Available: ${names}`,
+            }),
+          );
+        }
+      }
+
+      const flavors = listFlavors();
+      if (flavorFlag._tag === "Some") {
+        const valid = flavors.find((f) => f.name === flavorFlag.value);
+        if (!valid) {
+          const names = flavors.map((f) => f.name).join(", ");
+          yield* Effect.fail(
+            new InitError({
+              message: `Unknown flavor "${flavorFlag.value}". Available: ${names}`,
             }),
           );
         }
@@ -245,6 +267,39 @@ const initCommand = Command.make(
         selectedTemplate = selected as string;
       }
 
+      // Resolve flavor: CLI flag > interactive select (default from template)
+      let selectedFlavor: string;
+      if (flavorFlag._tag === "Some") {
+        selectedFlavor = flavorFlag.value;
+      } else {
+        const selectedTemplateMeta = listTemplates(selectedAgent.name).find(
+          (t) => t.name === selectedTemplate,
+        );
+        const defaultFlavor = selectedTemplateMeta?.environment ?? "node";
+        const selected = yield* Effect.promise(() =>
+          clack.select({
+            message: "What stack is this project?",
+            initialValue: defaultFlavor,
+            options: [
+              ...flavors.map((f) => ({
+                value: f.name,
+                label: f.label,
+              })),
+              {
+                value: "other",
+                label: "Other / I'll customize later",
+              },
+            ],
+          }),
+        );
+        if (clack.isCancel(selected)) {
+          yield* Effect.fail(
+            new InitError({ message: "Flavor selection cancelled." }),
+          );
+        }
+        selectedFlavor = selected === "other" ? "node" : (selected as string);
+      }
+
       // Offer to create the "Sandcastle" label on the repo (skip for non-GitHub backlog managers)
       let shouldCreateLabel: boolean | symbol = false;
       if (selectedBacklogManager.name === "github-issues") {
@@ -277,6 +332,7 @@ const initCommand = Command.make(
           createLabel: shouldCreateLabel === true,
           backlogManager: selectedBacklogManager,
           sandboxProvider: selectedSandboxProvider,
+          flavor: selectedFlavor,
         }).pipe(
           Effect.mapError(
             (e) =>

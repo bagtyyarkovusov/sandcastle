@@ -39,10 +39,17 @@ npm install --save-dev @ai-hero/sandcastle
 npx sandcastle init
 ```
 
-3. Edit `.sandcastle/.env` and fill in your default values for `ANTHROPIC_API_KEY`. If you want to use your Claude subscription instead of an API key, see [#191](https://github.com/mattpocock/sandcastle/issues/191).
+3. Edit `.sandcastle/.env` and fill in your API keys. For Claude Code, set `ANTHROPIC_API_KEY`. For Kimi Code, set `KIMI_API_KEY` (and `GH_TOKEN` if your workflow uses GitHub Issues). If you want to use your Claude subscription instead of an API key, see [#191](https://github.com/mattpocock/sandcastle/issues/191).
 
 ```bash
 cp .sandcastle/.env.example .sandcastle/.env
+```
+
+To scaffold with Kimi Code instead of Claude Code:
+
+```bash
+npx sandcastle init --agent kimi-code --template parallel-planner-with-review
+npx sandcastle docker build-image
 ```
 
 4. Run the `.sandcastle/main.ts` (or `main.mts`) file with `npx tsx`

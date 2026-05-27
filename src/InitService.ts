@@ -14,37 +14,45 @@ export interface TemplateMetadata {
   description: string;
   /** If set, this template only appears when one of these agents is selected. */
   compatibleAgents?: string[];
+  /** Recommended environment flavor for this template (e.g. "node", "python"). */
+  environment?: string;
 }
 
 const TEMPLATES: TemplateMetadata[] = [
   {
     name: "blank",
     description: "Bare scaffold — write your own prompt and orchestration",
+    environment: "node",
   },
   {
     name: "simple-loop",
     description: "Picks issues one by one and closes them",
+    environment: "node",
   },
   {
     name: "sequential-reviewer",
     description:
       "Implements issues one by one, with a code review step after each",
+    environment: "node",
   },
   {
     name: "parallel-planner",
     description:
       "Plans parallelizable issues, executes on separate branches, merges",
+    environment: "node",
   },
   {
     name: "parallel-planner-with-review",
     description:
       "Plans parallelizable issues, executes with per-branch review, merges",
+    environment: "node",
   },
   {
     name: "context7-enhanced",
     description:
       "Documentation-aware parallel planner — uses Context7 MCP for live library docs during implementation and review",
     compatibleAgents: ["kimi-code"],
+    environment: "node",
   },
 ];
 
@@ -72,19 +80,7 @@ export interface AgentEntry {
 
 const CLAUDE_CODE_DOCKERFILE = `FROM node:22-bookworm
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \\
-  git \\
-  curl \\
-  jq \\
-  python3 \\
-  make \\
-  g++ \\
-  openssl \\
-  ca-certificates \\
-  unzip \\
-  libssl-dev \\
-  && rm -rf /var/lib/apt/lists/*
+{{FLAVOR_PACKAGES}}
 
 # Enable pnpm via corepack (matches auto.tm-rewrite's packageManager field)
 RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
@@ -126,19 +122,7 @@ ENTRYPOINT ["sleep", "infinity"]
 
 const PI_DOCKERFILE = `FROM node:22-bookworm
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \\
-  git \\
-  curl \\
-  jq \\
-  python3 \\
-  make \\
-  g++ \\
-  openssl \\
-  ca-certificates \\
-  unzip \\
-  libssl-dev \\
-  && rm -rf /var/lib/apt/lists/*
+{{FLAVOR_PACKAGES}}
 
 {{BACKLOG_MANAGER_TOOLS}}
 
@@ -148,8 +132,17 @@ RUN apt-get update && apt-get install -y \\
 ARG AGENT_UID=1000
 ARG AGENT_GID=1000
 
-# Rename the base image's "node" user to "agent" and align UID/GID.
-RUN groupmod -g $AGENT_GID node && usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
+# Resolve GID conflict — on macOS the host GID (e.g. 20/staff) may already
+# exist in the Debian base image. We force-delete the conflicting group first
+# so groupmod can reassign the GID to 'node', then rename the user to 'agent'.
+RUN if getent group $AGENT_GID >/dev/null; then \\
+      CONFLICT_GROUP=\$(getent group $AGENT_GID | cut -d: -f1); \\
+      if [ "\$CONFLICT_GROUP" != "node" ]; then \\
+        groupdel -f "\$CONFLICT_GROUP" 2>/dev/null || true; \\
+      fi; \\
+    fi && \\
+    groupmod -g $AGENT_GID node && \\
+    usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
 
 # Install pi coding agent (run as root before USER agent)
 RUN npm install -g @mariozechner/pi-coding-agent
@@ -166,19 +159,7 @@ ENTRYPOINT ["sleep", "infinity"]
 
 const CODEX_DOCKERFILE = `FROM node:22-bookworm
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \\
-  git \\
-  curl \\
-  jq \\
-  python3 \\
-  make \\
-  g++ \\
-  openssl \\
-  ca-certificates \\
-  unzip \\
-  libssl-dev \\
-  && rm -rf /var/lib/apt/lists/*
+{{FLAVOR_PACKAGES}}
 
 {{BACKLOG_MANAGER_TOOLS}}
 
@@ -188,8 +169,17 @@ RUN apt-get update && apt-get install -y \\
 ARG AGENT_UID=1000
 ARG AGENT_GID=1000
 
-# Rename the base image's "node" user to "agent" and align UID/GID.
-RUN groupmod -g $AGENT_GID node && usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
+# Resolve GID conflict — on macOS the host GID (e.g. 20/staff) may already
+# exist in the Debian base image. We force-delete the conflicting group first
+# so groupmod can reassign the GID to 'node', then rename the user to 'agent'.
+RUN if getent group $AGENT_GID >/dev/null; then \\
+      CONFLICT_GROUP=\$(getent group $AGENT_GID | cut -d: -f1); \\
+      if [ "\$CONFLICT_GROUP" != "node" ]; then \\
+        groupdel -f "\$CONFLICT_GROUP" 2>/dev/null || true; \\
+      fi; \\
+    fi && \\
+    groupmod -g $AGENT_GID node && \\
+    usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
 
 # Install Codex CLI (run as root before USER agent)
 RUN npm install -g @openai/codex
@@ -206,19 +196,7 @@ ENTRYPOINT ["sleep", "infinity"]
 
 const OPENCODE_DOCKERFILE = `FROM node:22-bookworm
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \\
-  git \\
-  curl \\
-  jq \\
-  python3 \\
-  make \\
-  g++ \\
-  openssl \\
-  ca-certificates \\
-  unzip \\
-  libssl-dev \\
-  && rm -rf /var/lib/apt/lists/*
+{{FLAVOR_PACKAGES}}
 
 {{BACKLOG_MANAGER_TOOLS}}
 
@@ -228,8 +206,17 @@ RUN apt-get update && apt-get install -y \\
 ARG AGENT_UID=1000
 ARG AGENT_GID=1000
 
-# Rename the base image's "node" user to "agent" and align UID/GID.
-RUN groupmod -g $AGENT_GID node && usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
+# Resolve GID conflict — on macOS the host GID (e.g. 20/staff) may already
+# exist in the Debian base image. We force-delete the conflicting group first
+# so groupmod can reassign the GID to 'node', then rename the user to 'agent'.
+RUN if getent group $AGENT_GID >/dev/null; then \\
+      CONFLICT_GROUP=\$(getent group $AGENT_GID | cut -d: -f1); \\
+      if [ "\$CONFLICT_GROUP" != "node" ]; then \\
+        groupdel -f "\$CONFLICT_GROUP" 2>/dev/null || true; \\
+      fi; \\
+    fi && \\
+    groupmod -g $AGENT_GID node && \\
+    usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
 
 # Install OpenCode CLI (run as root before USER agent)
 RUN npm install -g opencode-ai@latest
@@ -253,24 +240,19 @@ const KIMI_CODE_DOCKERFILE = `FROM node:22-bookworm
 # files created inside the container (worktrees, commits) are owned by
 # you, so cleanup and git operations work without sudo.
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \\
-  git \\
-  curl \\
-  jq \\
-  python3 \\
-  make \\
-  g++ \\
-  openssl \\
-  ca-certificates \\
-  unzip \\
-  libssl-dev \\
-  && rm -rf /var/lib/apt/lists/*
+{{FLAVOR_PACKAGES}}
 
 # Enable pnpm via corepack (matches auto.tm-rewrite's packageManager field)
 RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
 
 {{BACKLOG_MANAGER_TOOLS}}
+
+# Playwright browser dependencies (for in-sandbox e2e tests)
+RUN apt-get update && apt-get install -y \\
+  libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \\
+  libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \\
+  libgbm1 libpango-1.0-0 libcairo2 libasound2 \\
+  && rm -rf /var/lib/apt/lists/*
 
 # Build-args for UID/GID alignment.
 # sandcastle docker build-image auto-detects these from the host (id -u / id -g).
@@ -301,6 +283,9 @@ RUN export PATH="/home/agent/.local/bin:\$PATH" && curl -LsSf https://code.kimi.
 RUN mkdir -p /home/agent/.kimi && \\
     printf 'default_model = "kimi-k2.6"\\n\\n[providers.kimi]\\ntype = "kimi"\\nbase_url = "https://api.kimi.com/coding/v1"\\napi_key = ""\\n\\n[models."kimi-k2.6"]\\nprovider = "kimi"\\nmodel = "kimi-k2.6"\\nmax_context_size = 262144\\n' > /home/agent/.kimi/config.toml && \\
     printf '{"mcpServers":{"context7":{"command":"npx","args":["-y","@upstash/context7-mcp"]}}}\\n' > /home/agent/.kimi/mcp.json
+
+# Install Playwright Chromium (system deps installed above as root)
+RUN npx playwright install chromium
 
 ENV PATH="/home/agent/.local/bin:\${PATH}"
 
@@ -361,6 +346,130 @@ CONTEXT7_API_KEY=`,
 ];
 
 export const listAgents = (): AgentEntry[] => AGENT_REGISTRY;
+
+// ---------------------------------------------------------------------------
+// Flavor registry (internal — not part of public API)
+// ---------------------------------------------------------------------------
+
+export interface FlavorEntry {
+  readonly name: string;
+  readonly label: string;
+  readonly dockerfileFragment: string;
+}
+
+const NODE_FLAVOR_PACKAGES = `# Install system dependencies
+RUN apt-get update && apt-get install -y \\
+  git \\
+  curl \\
+  jq \\
+  python3 \\
+  make \\
+  g++ \\
+  openssl \\
+  ca-certificates \\
+  unzip \\
+  libssl-dev \\
+  && rm -rf /var/lib/apt/lists/*`;
+
+const PYTHON_FLAVOR_PACKAGES = `# Install system dependencies
+RUN apt-get update && apt-get install -y \
+  git \
+  curl \
+  jq \
+  python3 \
+  python3-pip \
+  python3-venv \
+  make \
+  g++ \
+  openssl \
+  ca-certificates \
+  unzip \
+  libssl-dev \
+  && rm -rf /var/lib/apt/lists/*
+
+ENV PYTHONPATH="/home/agent/workspace:$PYTHONPATH"`;
+
+const JVM_FLAVOR_PACKAGES = `# Install system dependencies
+RUN apt-get update && apt-get install -y \
+  git \
+  curl \
+  jq \
+  python3 \
+  make \
+  g++ \
+  openssl \
+  ca-certificates \
+  unzip \
+  libssl-dev \
+  default-jdk \
+  gradle \
+  maven \
+  && rm -rf /var/lib/apt/lists/*`;
+
+const GO_FLAVOR_PACKAGES = `# Install system dependencies
+RUN apt-get update && apt-get install -y \
+  git \
+  curl \
+  jq \
+  python3 \
+  make \
+  g++ \
+  openssl \
+  ca-certificates \
+  unzip \
+  libssl-dev \
+  golang-go \
+  && rm -rf /var/lib/apt/lists/*`;
+
+const RUST_FLAVOR_PACKAGES = `# Install system dependencies
+RUN apt-get update && apt-get install -y \
+  git \
+  curl \
+  jq \
+  python3 \
+  make \
+  g++ \
+  openssl \
+  ca-certificates \
+  unzip \
+  libssl-dev \
+  && rm -rf /var/lib/apt/lists/* \
+  && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+
+ENV PATH="/root/.cargo/bin:$PATH"`;
+
+const FLAVOR_REGISTRY: FlavorEntry[] = [
+  {
+    name: "node",
+    label: "Node.js",
+    dockerfileFragment: NODE_FLAVOR_PACKAGES,
+  },
+  {
+    name: "python",
+    label: "Python",
+    dockerfileFragment: PYTHON_FLAVOR_PACKAGES,
+  },
+  {
+    name: "jvm",
+    label: "JVM",
+    dockerfileFragment: JVM_FLAVOR_PACKAGES,
+  },
+  {
+    name: "go",
+    label: "Go",
+    dockerfileFragment: GO_FLAVOR_PACKAGES,
+  },
+  {
+    name: "rust",
+    label: "Rust",
+    dockerfileFragment: RUST_FLAVOR_PACKAGES,
+  },
+];
+
+export const listFlavors = (): FlavorEntry[] => FLAVOR_REGISTRY;
+
+export const getFlavor = (name: string): FlavorEntry | undefined =>
+  FLAVOR_REGISTRY.find((f) => f.name === name);
 
 // ---------------------------------------------------------------------------
 // Backlog manager registry (internal — not part of public API)
@@ -731,6 +840,7 @@ export interface ScaffoldOptions {
   createLabel?: boolean;
   backlogManager?: BacklogManagerEntry;
   sandboxProvider?: SandboxProviderEntry;
+  flavor?: string;
 }
 
 export interface ScaffoldResult {
@@ -774,7 +884,16 @@ export const scaffold = (
       createLabel = true,
       backlogManager = BACKLOG_MANAGER_REGISTRY[0]!, // default: github-issues
       sandboxProvider = SANDBOX_PROVIDER_REGISTRY[0]!, // default: docker
+      flavor = "node",
     } = options;
+
+    const flavorEntry = getFlavor(flavor);
+    if (!flavorEntry) {
+      const names = FLAVOR_REGISTRY.map((f) => f.name).join(", ");
+      yield* Effect.fail(
+        new Error(`Unknown flavor: "${flavor}". Available: ${names}`),
+      );
+    }
     const fs = yield* FileSystem.FileSystem;
     const configDir = join(repoDir, ".sandcastle");
 
@@ -809,7 +928,10 @@ export const scaffold = (
         fs
           .writeFileString(
             join(configDir, sandboxProvider.containerfileName),
-            agent.dockerfileTemplate,
+            agent.dockerfileTemplate.replace(
+              "{{FLAVOR_PACKAGES}}",
+              flavorEntry!.dockerfileFragment,
+            ),
           )
           .pipe(Effect.mapError((e) => new Error(e.message))),
         fs

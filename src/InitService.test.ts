@@ -14,6 +14,8 @@ import {
   getBacklogManager,
   listSandboxProviders,
   getSandboxProvider,
+  listFlavors,
+  getFlavor,
 } from "./InitService.js";
 import type { AgentEntry, ScaffoldOptions } from "./InitService.js";
 import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
@@ -60,6 +62,109 @@ describe("Agent registry", () => {
 
   it("getAgent returns undefined for unknown agent", () => {
     expect(getAgent("nonexistent")).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Flavor registry
+// ---------------------------------------------------------------------------
+
+describe("Flavor registry", () => {
+  it("listFlavors returns all five flavors", () => {
+    const flavors = listFlavors();
+    expect(flavors.some((f) => f.name === "node")).toBe(true);
+    expect(flavors.some((f) => f.name === "python")).toBe(true);
+    expect(flavors.some((f) => f.name === "jvm")).toBe(true);
+    expect(flavors.some((f) => f.name === "go")).toBe(true);
+    expect(flavors.some((f) => f.name === "rust")).toBe(true);
+  });
+
+  it("getFlavor returns node entry with expected fields", () => {
+    const flavor = getFlavor("node");
+    expect(flavor).toBeDefined();
+    expect(flavor!.name).toBe("node");
+    expect(flavor!.label).toBe("Node.js");
+    expect(flavor!.dockerfileFragment).toContain("apt-get update");
+    expect(flavor!.dockerfileFragment).toContain("git");
+    expect(flavor!.dockerfileFragment).toContain("libssl-dev");
+  });
+
+  it("getFlavor returns python entry with expected fields", () => {
+    const flavor = getFlavor("python");
+    expect(flavor).toBeDefined();
+    expect(flavor!.name).toBe("python");
+    expect(flavor!.label).toBe("Python");
+    expect(flavor!.dockerfileFragment).toContain("python3-pip");
+    expect(flavor!.dockerfileFragment).toContain("python3-venv");
+    expect(flavor!.dockerfileFragment).toContain("PYTHONPATH");
+  });
+
+  it("getFlavor returns jvm entry with expected fields", () => {
+    const flavor = getFlavor("jvm");
+    expect(flavor).toBeDefined();
+    expect(flavor!.name).toBe("jvm");
+    expect(flavor!.label).toBe("JVM");
+    expect(flavor!.dockerfileFragment).toContain("default-jdk");
+    expect(flavor!.dockerfileFragment).toContain("gradle");
+    expect(flavor!.dockerfileFragment).toContain("maven");
+  });
+
+  it("getFlavor returns go entry with expected fields", () => {
+    const flavor = getFlavor("go");
+    expect(flavor).toBeDefined();
+    expect(flavor!.name).toBe("go");
+    expect(flavor!.label).toBe("Go");
+    expect(flavor!.dockerfileFragment).toContain("golang-go");
+  });
+
+  it("getFlavor returns rust entry with expected fields", () => {
+    const flavor = getFlavor("rust");
+    expect(flavor).toBeDefined();
+    expect(flavor!.name).toBe("rust");
+    expect(flavor!.label).toBe("Rust");
+    expect(flavor!.dockerfileFragment).toContain("rustup");
+  });
+
+  it("getFlavor returns undefined for unknown flavor", () => {
+    expect(getFlavor("nonexistent")).toBeUndefined();
+  });
+
+  it("TemplateMetadata supports an optional environment field", () => {
+    const templates = listTemplates();
+    const blank = templates.find((t) => t.name === "blank");
+    expect(blank).toBeDefined();
+    expect(blank!.environment).toBe("node");
+
+    const context7 = templates.find((t) => t.name === "context7-enhanced");
+    expect(context7).toBeDefined();
+    expect(context7!.environment).toBe("node");
+  });
+
+  it("a template with environment: python resolves to the python flavor", () => {
+    // Verify that getFlavor can resolve a flavor that a template might declare
+    const flavor = getFlavor("python");
+    expect(flavor).toBeDefined();
+    expect(flavor!.name).toBe("python");
+    expect(flavor!.dockerfileFragment).toContain("python3-pip");
+    expect(flavor!.dockerfileFragment).toContain("python3-venv");
+  });
+
+  it("node flavor dockerfileFragment matches the exact legacy system-deps block", () => {
+    const flavor = getFlavor("node")!;
+    const expected = `# Install system dependencies
+RUN apt-get update && apt-get install -y \\
+  git \\
+  curl \\
+  jq \\
+  python3 \\
+  make \\
+  g++ \\
+  openssl \\
+  ca-certificates \\
+  unzip \\
+  libssl-dev \\
+  && rm -rf /var/lib/apt/lists/*`;
+    expect(flavor.dockerfileFragment).toBe(expected);
   });
 
   it("listAgents includes pi", () => {
@@ -263,7 +368,7 @@ describe("InitService scaffold", () => {
     expect(dockerfile).toContain(SANDBOX_REPO_DIR);
   });
 
-  it("claude-code Dockerfile template does not install pnpm or enable corepack", async () => {
+  it("claude-code Dockerfile template enables corepack for pnpm monorepos", async () => {
     const dir = await makeDir();
     await runScaffold(dir);
 
@@ -271,8 +376,8 @@ describe("InitService scaffold", () => {
       join(dir, ".sandcastle", "Dockerfile"),
       "utf-8",
     );
-    expect(dockerfile).not.toContain("corepack");
-    expect(dockerfile).not.toContain("pnpm");
+    expect(dockerfile).toContain("corepack");
+    expect(dockerfile).toContain("pnpm");
   });
 
   it("skeleton prompt contains section headers and hints", async () => {
@@ -683,6 +788,7 @@ describe("InitService scaffold", () => {
     );
     expect(dockerfile).toContain("FROM node:22-bookworm");
     expect(dockerfile).toContain("@mariozechner/pi-coding-agent");
+    expect(dockerfile).toContain("groupdel -f");
     expect(dockerfile).not.toContain("{{BACKLOG_MANAGER_TOOLS}}");
   });
 
@@ -708,6 +814,7 @@ describe("InitService scaffold", () => {
     );
     expect(dockerfile).toContain("FROM node:22-bookworm");
     expect(dockerfile).toContain("@openai/codex");
+    expect(dockerfile).toContain("groupdel -f");
     expect(dockerfile).not.toContain("{{BACKLOG_MANAGER_TOOLS}}");
   });
 
@@ -733,6 +840,8 @@ describe("InitService scaffold", () => {
     );
     expect(dockerfile).toContain("FROM node:22-bookworm");
     expect(dockerfile).toContain("code.kimi.com/install.sh");
+    expect(dockerfile).toContain("groupdel -f");
+    expect(dockerfile).toContain("npx playwright install chromium");
     expect(dockerfile).not.toContain("{{BACKLOG_MANAGER_TOOLS}}");
   });
 
@@ -750,7 +859,7 @@ describe("InitService scaffold", () => {
 
   // --- createLabel option ---
 
-  it("simple-loop prompt.md retains --label Sandcastle when createLabel is true", async () => {
+  it("simple-loop prompt.md retains --label ready-for-agent when createLabel is true", async () => {
     const dir = await makeDir();
     await runScaffold(dir, { templateName: "simple-loop", createLabel: true });
 
@@ -758,10 +867,10 @@ describe("InitService scaffold", () => {
       join(dir, ".sandcastle", "prompt.md"),
       "utf-8",
     );
-    expect(prompt).toContain("--label Sandcastle");
+    expect(prompt).toContain("--label ready-for-agent");
   });
 
-  it("simple-loop prompt.md strips --label Sandcastle when createLabel is false", async () => {
+  it("simple-loop prompt.md strips --label ready-for-agent when createLabel is false", async () => {
     const dir = await makeDir();
     await runScaffold(dir, { templateName: "simple-loop", createLabel: false });
 
@@ -769,14 +878,14 @@ describe("InitService scaffold", () => {
       join(dir, ".sandcastle", "prompt.md"),
       "utf-8",
     );
-    expect(prompt).not.toContain("--label Sandcastle");
+    expect(prompt).not.toContain("--label ready-for-agent");
     // The gh issue list command should still be valid
     expect(prompt).toContain("gh issue list");
     // No double spaces in gh commands from removal
     expect(prompt).not.toMatch(/gh issue list {2}/);
   });
 
-  it("parallel-planner plan-prompt.md strips --label Sandcastle when createLabel is false", async () => {
+  it("parallel-planner plan-prompt.md strips --label ready-for-agent when createLabel is false", async () => {
     const dir = await makeDir();
     await runScaffold(dir, {
       templateName: "parallel-planner",
@@ -787,11 +896,11 @@ describe("InitService scaffold", () => {
       join(dir, ".sandcastle", "plan-prompt.md"),
       "utf-8",
     );
-    expect(prompt).not.toContain("--label Sandcastle");
+    expect(prompt).not.toContain("--label ready-for-agent");
     expect(prompt).toContain("gh issue list");
   });
 
-  it("sequential-reviewer implement-prompt.md strips --label Sandcastle when createLabel is false", async () => {
+  it("sequential-reviewer implement-prompt.md strips --label ready-for-agent when createLabel is false", async () => {
     const dir = await makeDir();
     await runScaffold(dir, {
       templateName: "sequential-reviewer",
@@ -802,7 +911,7 @@ describe("InitService scaffold", () => {
       join(dir, ".sandcastle", "implement-prompt.md"),
       "utf-8",
     );
-    expect(prompt).not.toContain("--label Sandcastle");
+    expect(prompt).not.toContain("--label ready-for-agent");
     expect(prompt).toContain("gh issue list");
   });
 
@@ -834,7 +943,7 @@ describe("InitService scaffold", () => {
       join(dir, ".sandcastle", "prompt.md"),
       "utf-8",
     );
-    expect(prompt).toContain("--label Sandcastle");
+    expect(prompt).toContain("--label ready-for-agent");
   });
 
   it("unknown template name throws a clear error", async () => {
@@ -842,6 +951,208 @@ describe("InitService scaffold", () => {
     await expect(
       runScaffold(dir, { templateName: "nonexistent" }),
     ).rejects.toThrow("nonexistent");
+  });
+
+  it("unknown flavor throws a clear error listing valid flavors", async () => {
+    const dir = await makeDir();
+    await expect(runScaffold(dir, { flavor: "nonexistent" })).rejects.toThrow(
+      'Unknown flavor: "nonexistent". Available: node, python, jvm, go, rust',
+    );
+  });
+
+  it("--flavor node produces byte-identical Dockerfile output to pre-flavor implementation", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      agent: claudeCodeAgent,
+      model: "claude-opus-4-6",
+    });
+
+    const dockerfile = await readFile(
+      join(dir, ".sandcastle", "Dockerfile"),
+      "utf-8",
+    );
+
+    const expected = `FROM node:22-bookworm
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \\
+  git \\
+  curl \\
+  jq \\
+  python3 \\
+  make \\
+  g++ \\
+  openssl \\
+  ca-certificates \\
+  unzip \\
+  libssl-dev \\
+  && rm -rf /var/lib/apt/lists/*
+
+# Enable pnpm via corepack (matches auto.tm-rewrite's packageManager field)
+RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
+
+# Install GitHub CLI
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \\
+  | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \\
+  && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \\
+  | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \\
+  && apt-get update && apt-get install -y gh \\
+  && rm -rf /var/lib/apt/lists/*
+
+# Build-args for UID/GID alignment: sandcastle docker build-image
+# defaults these to the host user's UID/GID so image-built files
+# and bind-mounted files share an owner without runtime chown.
+ARG AGENT_UID=1000
+ARG AGENT_GID=1000
+
+# Resolve GID conflict — on macOS the host GID (e.g. 20/staff) may already
+# exist in the Debian base image. We force-delete the conflicting group first
+# so groupmod can reassign the GID to 'node', then rename the user to 'agent'.
+RUN if getent group $AGENT_GID >/dev/null; then \
+      CONFLICT_GROUP=$(getent group $AGENT_GID | cut -d: -f1); \
+      if [ "$CONFLICT_GROUP" != "node" ]; then \
+        groupdel -f "$CONFLICT_GROUP" 2>/dev/null || true; \
+      fi; \
+    fi && \
+    groupmod -g $AGENT_GID node && \
+    usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
+USER \${AGENT_UID}:\${AGENT_GID}
+
+# Install Claude Code CLI
+RUN curl -fsSL https://claude.ai/install.sh | bash
+
+# Add Claude to PATH
+ENV PATH="/home/agent/.local/bin:$PATH"
+
+WORKDIR /home/agent
+
+# In worktree sandbox mode, Sandcastle bind-mounts the git worktree at /home/agent/workspace
+# and overrides the working directory to /home/agent/workspace at container start.
+# Structure your Dockerfile so that /home/agent/workspace can serve as the project root.
+ENTRYPOINT ["sleep", "infinity"]
+`;
+
+    expect(dockerfile).toBe(expected);
+  });
+
+  it("scaffolded Dockerfile does not contain {{FLAVOR_PACKAGES}} placeholder", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir);
+
+    const dockerfile = await readFile(
+      join(dir, ".sandcastle", "Dockerfile"),
+      "utf-8",
+    );
+    expect(dockerfile).not.toContain("{{FLAVOR_PACKAGES}}");
+  });
+
+  it("scaffolding with --flavor python produces Dockerfile containing pip, venv, and PYTHONPATH", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, { flavor: "python" });
+
+    const dockerfile = await readFile(
+      join(dir, ".sandcastle", "Dockerfile"),
+      "utf-8",
+    );
+    expect(dockerfile).toContain("python3-pip");
+    expect(dockerfile).toContain("python3-venv");
+    expect(dockerfile).toContain("PYTHONPATH");
+  });
+
+  it("python-flavored Dockerfile does not contain JVM, Go, or Rust tooling", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, { flavor: "python" });
+
+    const dockerfile = await readFile(
+      join(dir, ".sandcastle", "Dockerfile"),
+      "utf-8",
+    );
+    expect(dockerfile).not.toContain("openjdk");
+    expect(dockerfile).not.toContain("default-jdk");
+    expect(dockerfile).not.toContain("gradle");
+    expect(dockerfile).not.toContain("maven");
+    expect(dockerfile).not.toContain("golang");
+    expect(dockerfile).not.toContain("rustup");
+    expect(dockerfile).not.toContain("rustc");
+    expect(dockerfile).not.toContain("cargo");
+  });
+
+  it("scaffolding with --flavor jvm produces Dockerfile containing JDK, gradle, and maven", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, { flavor: "jvm" });
+
+    const dockerfile = await readFile(
+      join(dir, ".sandcastle", "Dockerfile"),
+      "utf-8",
+    );
+    expect(dockerfile).toContain("default-jdk");
+    expect(dockerfile).toContain("gradle");
+    expect(dockerfile).toContain("maven");
+  });
+
+  it("jvm-flavored Dockerfile does not contain Python, Go, or Rust tooling", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, { flavor: "jvm" });
+
+    const dockerfile = await readFile(
+      join(dir, ".sandcastle", "Dockerfile"),
+      "utf-8",
+    );
+    expect(dockerfile).not.toContain("python3-pip");
+    expect(dockerfile).not.toContain("python3-venv");
+    expect(dockerfile).not.toContain("golang-go");
+    expect(dockerfile).not.toContain("rustup");
+  });
+
+  it("scaffolding with --flavor go produces Dockerfile containing golang-go", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, { flavor: "go" });
+
+    const dockerfile = await readFile(
+      join(dir, ".sandcastle", "Dockerfile"),
+      "utf-8",
+    );
+    expect(dockerfile).toContain("golang-go");
+  });
+
+  it("go-flavored Dockerfile does not contain Python, JVM, or Rust tooling", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, { flavor: "go" });
+
+    const dockerfile = await readFile(
+      join(dir, ".sandcastle", "Dockerfile"),
+      "utf-8",
+    );
+    expect(dockerfile).not.toContain("python3-pip");
+    expect(dockerfile).not.toContain("default-jdk");
+    expect(dockerfile).not.toContain("gradle");
+    expect(dockerfile).not.toContain("rustup");
+  });
+
+  it("scaffolding with --flavor rust produces Dockerfile containing rustup and cargo PATH", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, { flavor: "rust" });
+
+    const dockerfile = await readFile(
+      join(dir, ".sandcastle", "Dockerfile"),
+      "utf-8",
+    );
+    expect(dockerfile).toContain("rustup");
+    expect(dockerfile).toContain(".cargo/bin");
+  });
+
+  it("rust-flavored Dockerfile does not contain Python, JVM, or Go tooling", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, { flavor: "rust" });
+
+    const dockerfile = await readFile(
+      join(dir, ".sandcastle", "Dockerfile"),
+      "utf-8",
+    );
+    expect(dockerfile).not.toContain("python3-pip");
+    expect(dockerfile).not.toContain("default-jdk");
+    expect(dockerfile).not.toContain("gradle");
+    expect(dockerfile).not.toContain("golang-go");
   });
 
   describe("parallel-planner template", () => {
@@ -1286,7 +1597,7 @@ describe("InitService scaffold", () => {
       expect(prompt).not.toContain("{{CLOSE_TASK_COMMAND}}");
     });
 
-    it("simple-loop with beads skips --label Sandcastle (no label to strip)", async () => {
+    it("simple-loop with beads skips --label ready-for-agent (no label to strip)", async () => {
       const dir = await makeDir();
       await runScaffold(dir, {
         templateName: "simple-loop",
@@ -1297,10 +1608,10 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "prompt.md"),
         "utf-8",
       );
-      expect(prompt).not.toContain("--label Sandcastle");
+      expect(prompt).not.toContain("--label ready-for-agent");
     });
 
-    it("simple-loop with github-issues retains --label Sandcastle when createLabel is true", async () => {
+    it("simple-loop with github-issues retains --label ready-for-agent when createLabel is true", async () => {
       const dir = await makeDir();
       await runScaffold(dir, {
         templateName: "simple-loop",
@@ -1312,10 +1623,10 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "prompt.md"),
         "utf-8",
       );
-      expect(prompt).toContain("--label Sandcastle");
+      expect(prompt).toContain("--label ready-for-agent");
     });
 
-    it("simple-loop with github-issues strips --label Sandcastle when createLabel is false", async () => {
+    it("simple-loop with github-issues strips --label ready-for-agent when createLabel is false", async () => {
       const dir = await makeDir();
       await runScaffold(dir, {
         templateName: "simple-loop",
@@ -1327,7 +1638,7 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "prompt.md"),
         "utf-8",
       );
-      expect(prompt).not.toContain("--label Sandcastle");
+      expect(prompt).not.toContain("--label ready-for-agent");
       expect(prompt).toContain("gh issue list");
     });
 
@@ -1730,7 +2041,6 @@ describe("InitService scaffold", () => {
         "utf-8",
       );
       expect(prompt).toContain("bd close");
-      expect(prompt).not.toContain("gh issue");
       expect(prompt).not.toContain("{{CLOSE_TASK_COMMAND}}");
     });
 

@@ -1,4 +1,5 @@
 {
   "name": "blank",
-  "description": "Bare scaffold — write your own prompt and orchestration"
+  "description": "Bare scaffold — write your own prompt and orchestration",
+  "environment": "node"
 }

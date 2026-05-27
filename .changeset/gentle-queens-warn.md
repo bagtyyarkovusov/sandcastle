@@ -11,4 +11,5 @@ Kimi Provider Parity: robustness and observability improvements
 - Added `AgentStreamEvent` `thinking` variant for observability callbacks
 - Hardened session-ID extraction with multiple fallback regex patterns
 - Hardened session transfer to survive malformed JSONL lines
+- Kimi session transfer uses shared `copySessionPreservingMalformedLines` helper
 - Wired `dangerouslySkipPermissions` through to Kimi CLI's `--yolo` flag
